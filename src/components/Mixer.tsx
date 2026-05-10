@@ -38,6 +38,8 @@ export default function Mixer() {
           <MixerStrip 
             key={track.id} 
             track={track} 
+            isActive={selectedTrackId === track.id}
+            onSelect={() => useStore.setState({ selectedTrackId: track.id })}
             onUpdate={(updates) => updateTrack(track.id, updates)} 
           />
         ))}
@@ -95,14 +97,37 @@ export default function Mixer() {
   );
 }
 
-function MixerStrip({ track, onUpdate }: { track: Track; onUpdate: (updates: Partial<Track>) => void; key?: string }) {
+function MixerStrip({ track, onUpdate, isActive, onSelect }: { track: Track; onUpdate: (updates: Partial<Track>) => void; isActive: boolean; onSelect: () => void; key?: string }) {
   return (
-    <div className="w-20 bg-zinc-900/40 border border-zinc-800/50 rounded-md flex flex-col items-center py-2 relative group hover:bg-zinc-900/60 hover:border-zinc-700 transition-all duration-300">
-       <div className="text-[10px] font-bold text-zinc-400 uppercase mb-3 truncate w-full px-2 text-center tracking-tighter">
+    <div 
+      onClick={onSelect}
+      className={`w-20 bg-zinc-900/40 border rounded-md flex flex-col items-center py-2 relative group hover:bg-zinc-900/60 transition-all duration-300 cursor-pointer ${isActive ? 'border-brand-orange shadow-[0_0_15px_rgba(234,88,12,0.15)] bg-zinc-900/80' : 'border-zinc-800/50'}`}
+    >
+       <div className={`text-[10px] font-bold uppercase mb-1 truncate w-full px-2 text-center tracking-tighter ${isActive ? 'text-brand-orange' : 'text-zinc-400'}`}>
          {track.name}
        </div>
+
+       {/* Real-time VST Parameters */}
+       {track.instrument?.settings && (
+         <div className="w-full px-2 mb-2 space-y-0.5">
+           {Object.entries(track.instrument.settings).slice(0, 2).map(([key, value]) => (
+             <div key={key} className="flex flex-col">
+               <div className="flex justify-between items-center text-[7px] font-black text-zinc-600 uppercase tracking-widest leading-none">
+                 <span>{key.substring(0, 3)}</span>
+                 <span className="text-brand-orange/70 font-mono">{(value as number).toFixed(1)}</span>
+               </div>
+               <div className="w-full h-0.5 bg-zinc-950 rounded-full overflow-hidden mt-0.5">
+                 <div 
+                   className="h-full bg-brand-orange transition-all duration-100" 
+                   style={{ width: `${Math.min(100, (value as number) / (key === 'cutoff' ? 50 : 0.02))}%` }}
+                 />
+               </div>
+             </div>
+           ))}
+         </div>
+       )}
        
-       <div className="flex-1 w-full px-2 flex flex-col gap-3 items-center justify-end">
+       <div className="flex-1 w-full px-2 flex flex-col gap-2 items-center justify-end">
           <div className="flex gap-1">
             <button 
               onClick={(e) => { e.stopPropagation(); onUpdate({ muted: !track.muted }); }}

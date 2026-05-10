@@ -309,6 +309,7 @@ class AudioEngine {
     const ctx = this.getContext();
     let destination: AudioNode = ctx.destination;
     
+    const track = useStore.getState().tracks.find(t => t.id === trackId);
     const node = this.trackNodes.get(trackId);
     if (node) {
       destination = node.gain;
@@ -316,26 +317,51 @@ class AudioEngine {
       destination = this.masterBus;
     }
     
+    const instrument = track?.instrument;
+    const type = instrument?.type || 'synth-mono';
+
+    switch (type) {
+      case 'synth-mono':
+        this.synthMono(midi, duration, destination, instrument?.settings);
+        break;
+      case 'synth-pad':
+        this.synthPad(midi, duration, destination, instrument?.settings);
+        break;
+      case 'synth-lead':
+        this.synthLead(midi, duration, destination, instrument?.settings);
+        break;
+      case 'drums':
+        this.drumTrigger(midi, destination);
+        break;
+      default:
+        this.synthMono(midi, duration, destination);
+    }
+  }
+
+  private synthMono(midi: number, duration: number, destination: AudioNode, settings?: any) {
+    const ctx = this.getContext();
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
     const osc = ctx.createOscillator();
     const sub = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
 
-    osc.type = 'square';
+    osc.type = settings?.oscType || 'square';
     sub.type = 'sine';
-    osc.frequency.value = freq;
-    sub.frequency.value = freq / 2;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    sub.frequency.setValueAtTime(freq / 2, ctx.currentTime);
 
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(2000, ctx.currentTime);
+    const cutoff = settings?.cutoff || 1500;
+    filter.frequency.setValueAtTime(cutoff, ctx.currentTime);
+    // Filter Envelope
     filter.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + duration);
+    filter.Q.value = settings?.resonance || 2;
 
-    // ADSR Envelope
-    const attack = 0.05;
-    const release = 0.2;
+    const attack = settings?.attack || 0.05;
+    const release = settings?.release || 0.3;
     gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + attack);
+    gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + attack);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration + release);
 
     osc.connect(filter);
@@ -347,6 +373,142 @@ class AudioEngine {
     sub.start();
     osc.stop(ctx.currentTime + duration + release);
     sub.stop(ctx.currentTime + duration + release);
+  }
+
+  private synthPad(midi: number, duration: number, destination: AudioNode, settings?: any) {
+    const ctx = this.getContext();
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    
+    // Polyphonic-ish feel with two detuned oscillators
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc1.type = 'sawtooth';
+    osc2.type = 'sawtooth';
+    osc1.frequency.value = freq;
+    osc2.frequency.value = freq * 1.005; // Light detune
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, ctx.currentTime);
+    filter.Q.value = 1;
+
+    const attack = 0.8; // Long attack for pad
+    const release = 1.5;
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + attack);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration + release);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(destination);
+
+    osc1.start();
+    osc2.start();
+    osc1.stop(ctx.currentTime + duration + release);
+    osc1.stop(ctx.currentTime + duration + release);
+  }
+
+  private synthLead(midi: number, duration: number, destination: AudioNode, settings?: any) {
+    const ctx = this.getContext();
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    
+    // Triple oscillator for a thick sound
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const osc3 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc1.type = 'sawtooth';
+    osc2.type = 'sawtooth';
+    osc3.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(freq, ctx.currentTime);
+    osc2.frequency.setValueAtTime(freq * 1.01, ctx.currentTime);
+    osc3.frequency.setValueAtTime(freq * 0.99, ctx.currentTime);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(3000, ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(1000, ctx.currentTime + duration);
+
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration + 0.1);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    osc3.connect(filter);
+    filter.connect(gain);
+    gain.connect(destination);
+
+    osc1.start();
+    osc2.start();
+    osc3.start();
+    osc1.stop(ctx.currentTime + duration + 0.1);
+    osc2.stop(ctx.currentTime + duration + 0.1);
+    osc3.stop(ctx.currentTime + duration + 0.1);
+  }
+
+  private drumTrigger(midi: number, destination: AudioNode) {
+    const ctx = this.getContext();
+    const gain = ctx.createGain();
+    gain.connect(destination);
+
+    // Basic GM Drum Mapping
+    if (midi === 36) { // Kick
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.frequency.setValueAtTime(150, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+      g.gain.setValueAtTime(1, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+      osc.connect(g);
+      g.connect(gain);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.5);
+    } else if (midi === 38) { // Snare
+      const noise = ctx.createBufferSource();
+      const bufferSize = ctx.sampleRate * 0.2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      noise.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 1000;
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.5, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+
+      noise.connect(filter);
+      filter.connect(g);
+      g.connect(gain);
+      noise.start();
+    } else if (midi === 42) { // Hi-Hat
+      const noise = ctx.createBufferSource();
+      const bufferSize = ctx.sampleRate * 0.05;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      noise.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 7000;
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.3, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+
+      noise.connect(filter);
+      filter.connect(g);
+      g.connect(gain);
+      noise.start();
+    }
   }
 
   async loadAudio(url: string): Promise<AudioBuffer> {

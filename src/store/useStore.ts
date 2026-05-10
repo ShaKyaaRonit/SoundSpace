@@ -26,6 +26,13 @@ export interface Effect {
   enabled: boolean;
 }
 
+export interface Instrument {
+  id: string;
+  name: string;
+  type: 'synth-mono' | 'synth-pad' | 'synth-lead' | 'sampler-piano' | 'drums';
+  settings: any;
+}
+
 export interface Track {
   id: string;
   name: string;
@@ -36,6 +43,7 @@ export interface Track {
   soloed: boolean;
   regions: Region[];
   effects: Effect[];
+  instrument?: Instrument;
 }
 
 export interface DAWState {
@@ -53,9 +61,11 @@ export interface DAWState {
   selectedRegionId: string | null;
   isProcessing: boolean; // For AI tasks
   activeTool: 'pointer' | 'scissors';
+  projectId: string | null;
   
   // Actions
   setTool: (tool: 'pointer' | 'scissors') => void;
+  setProjectId: (id: string | null) => void;
   setPlaying: (playing: boolean) => void;
   setRecording: (recording: boolean) => void;
   setMetronome: (enabled: boolean) => void;
@@ -71,7 +81,9 @@ export interface DAWState {
   updateTrack: (id: string, updates: Partial<Track>) => void;
   removeTrack: (id: string) => void;
   addRegion: (trackId: string, region: Omit<Region, 'id'>) => void;
+  updateTrackInstrument: (trackId: string, updates: any) => void;
   setProject: (name: string, tracks: Track[]) => void;
+  setProjectName: (name: string) => void;
 }
 
 export const useStore = create<DAWState>()(
@@ -103,8 +115,10 @@ export const useStore = create<DAWState>()(
       snapEnabled: true,
       isProcessing: false,
       activeTool: 'pointer',
+      projectId: null,
 
       setTool: (tool) => set({ activeTool: tool }),
+      setProjectId: (id) => set({ projectId: id }),
       setPlaying: (playing) => set({ isPlaying: playing }),
       setRecording: (recording) => set({ isRecording: recording }),
       setMetronome: (enabled) => set({ metronomeEnabled: enabled }),
@@ -126,7 +140,13 @@ export const useStore = create<DAWState>()(
             muted: false,
             soloed: false,
             regions: [],
-            effects: []
+            effects: [],
+            instrument: type === 'midi' ? {
+              id: uuidv4(),
+              name: 'Deep Bass Synth',
+              type: 'synth-mono',
+              settings: { cutoff: 800, resonance: 2, attack: 0.05, release: 0.3 }
+            } : undefined
           }
         ]
       })),
@@ -155,13 +175,22 @@ export const useStore = create<DAWState>()(
             : t
         )
       })),
-      setProject: (name, tracks) => set({ projectName: name, tracks })
+      updateTrackInstrument: (trackId, updates) => set((state) => ({
+        tracks: state.tracks.map(t => 
+          t.id === trackId && t.instrument 
+            ? { ...t, instrument: { ...t.instrument, settings: { ...t.instrument.settings, ...updates } } } 
+            : t
+        )
+      })),
+      setProject: (name, tracks) => set({ projectName: name, tracks }),
+      setProjectName: (name) => set({ projectName: name })
     }),
     {
       name: 'soundspace-storage',
       //@ts-ignore - AudioBuffer is not serializable, we need to handle this
       partialize: (state) => ({
         projectName: state.projectName,
+        projectId: state.projectId,
         tracks: state.tracks.map(t => ({
           ...t,
           regions: t.regions.map(({ buffer, ...r }) => r) // Strip buffers from persistence

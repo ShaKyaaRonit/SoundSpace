@@ -3,20 +3,39 @@ import { Play, Pause, Square, Mic, Save, FolderOpen, Settings, Volume2, CloudUpl
 import { useStore } from '../store/useStore';
 import { audioEngine } from '../lib/audio-engine';
 import { projectService } from '../services/projectService';
+import ProjectBrowser from './ProjectBrowser';
+import { signInWithGoogle, auth } from '../lib/firebase';
+import { LogIn, User } from 'lucide-react';
 
 export default function Toolbar() {
   const { 
     isPlaying, setPlaying, 
     isRecording, setRecording, 
     currentTime, setCurrentTime, 
-    projectName, tracks, 
+    projectName, setProjectName, tracks, 
+    bpm,
     addTrack, addRegion, 
     metronomeEnabled, setMetronome, 
     snapEnabled, setSnap,
     isProcessing,
-    activeTool, setTool
+    activeTool, setTool,
+    projectId, setProjectId
   } = useStore();
   const [isSaving, setIsSaving] = useState(false);
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+  const [user, setUser] = useState(auth.currentUser);
+
+  React.useEffect(() => {
+    return auth.onAuthStateChanged((u) => setUser(u));
+  }, []);
+
+  const handleAuth = async () => {
+    if (user) {
+      if (confirm("Sign out?")) await auth.signOut();
+    } else {
+      await signInWithGoogle();
+    }
+  };
 
   const handlePlayPause = async () => {
     if (isPlaying || isRecording) {
@@ -69,7 +88,8 @@ export default function Toolbar() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await projectService.saveProject(projectName, tracks);
+      const id = await projectService.saveProject(projectName, tracks, bpm, projectId);
+      setProjectId(id);
       alert("Project saved successfully!");
     } catch (e) {
       alert("Failed to save project. Make sure you are signed in.");
@@ -166,6 +186,16 @@ export default function Toolbar() {
             AI Processing
           </div>
         )}
+
+        <div className="flex flex-col ml-4">
+          <input 
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            className="bg-transparent border-none p-0 text-zinc-100 font-bold text-sm focus:ring-0 w-32 placeholder-zinc-700"
+            placeholder="Project Name"
+          />
+          <span className="text-[8px] text-zinc-600 uppercase font-black tracking-widest">Active Session</span>
+        </div>
       </div>
 
       <div className="flex items-center gap-12">
@@ -193,6 +223,13 @@ export default function Toolbar() {
 
       <div className="flex items-center gap-3">
         <button 
+          onClick={() => setIsBrowserOpen(true)}
+          className="w-10 h-10 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-brand-orange hover:border-brand-orange/50 transition-all group"
+          title="Open Library"
+        >
+          <FolderOpen size={18} className="group-hover:scale-110 transition-transform" />
+        </button>
+        <button 
           onClick={handleSave}
           disabled={isSaving}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-[11px] font-black text-zinc-400 uppercase tracking-widest hover:border-zinc-700 hover:text-white transition-all disabled:opacity-50"
@@ -207,8 +244,24 @@ export default function Toolbar() {
           <CloudUpload size={14} strokeWidth={3} />
           Export
         </button>
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-zinc-700 to-black border border-white/10 flex items-center justify-center text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">AI</div>
+        
+        <button 
+          onClick={handleAuth}
+          className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all ${user ? 'bg-zinc-800 border-zinc-700 text-brand-orange' : 'bg-black border-white/10 text-zinc-500 hover:text-white'}`}
+          title={user ? `Signed in as ${user.displayName}` : "Sign In"}
+        >
+          {user ? (
+            user.photoURL ? (
+              <img src={user.photoURL} alt="User" className="w-full h-full rounded-full" />
+            ) : (
+              <User size={18} />
+            )
+          ) : (
+            <LogIn size={18} />
+          )}
+        </button>
       </div>
+      <ProjectBrowser isOpen={isBrowserOpen} onClose={() => setIsBrowserOpen(false)} />
     </header>
   );
 }

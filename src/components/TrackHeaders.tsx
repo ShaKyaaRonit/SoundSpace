@@ -31,6 +31,7 @@ function TrackHeaderItem({ track, index, isActive, onUpdate, onSelect }: {
   isActive: boolean;
   onUpdate: (updates: Partial<Track>) => void;
   onSelect: () => void;
+  key?: string;
 }) {
   const [isBalancing, setIsBalancing] = useState(false);
 
@@ -61,6 +62,11 @@ function TrackHeaderItem({ track, index, isActive, onUpdate, onSelect }: {
             className="bg-transparent border-none focus:ring-0 text-sm font-semibold p-0 text-zinc-300 w-full truncate focus:text-zinc-100"
           />
         </div>
+        {track.type === 'midi' && (
+          <span className="text-[8px] bg-brand-orange/10 text-brand-orange px-1 rounded font-black uppercase tracking-widest mt-0.5">
+            {track.instrument?.name || 'Instrument'}
+          </span>
+        )}
         <button className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-zinc-200 transition-opacity">
           <MoreVertical size={14} />
         </button>

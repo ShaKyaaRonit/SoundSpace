@@ -7,31 +7,58 @@ import {
   query, 
   where, 
   serverTimestamp,
-  getDoc
+  getDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Track } from '../store/useStore';
 
 export const projectService = {
-  async saveProject(name: string, tracks: Track[]) {
+  async saveProject(name: string, tracks: Track[], bpm: number, id?: string | null) {
     if (!auth.currentUser) throw new Error("Not authenticated");
     
     const projectData = {
       name,
+      bpm,
       authorId: auth.currentUser.uid,
       tracks: tracks.map(t => ({
-        ...t,
+        id: t.id,
+        name: t.name,
+        type: t.type,
+        volume: t.volume,
+        pan: t.pan,
+        muted: t.muted,
+        soloed: t.soloed,
+        effects: t.effects || [],
         regions: t.regions.map(r => ({
           id: r.id,
           startTime: r.startTime,
           duration: r.duration,
-          audioUrl: r.audioUrl || null
+          audioUrl: r.audioUrl || null,
+          name: (r as any).name || 'Region',
+          notes: r.notes || []
         }))
       })),
       updatedAt: serverTimestamp()
     };
 
-    return await addDoc(collection(db, 'projects'), projectData);
+    if (id) {
+      const docRef = doc(db, 'projects', id);
+      await updateDoc(docRef, projectData);
+      return id;
+    } else {
+      const docRef = await addDoc(collection(db, 'projects'), {
+        ...projectData,
+        createdAt: serverTimestamp()
+      });
+      return docRef.id;
+    }
+  },
+
+  async deleteProject(id: string) {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    const docRef = doc(db, 'projects', id);
+    await deleteDoc(docRef);
   },
 
   async getProjects() {

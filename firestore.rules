@@ -16,10 +16,11 @@ service cloud.firestore {
     }
 
     function isValidProject(data) {
-      return data.keys().hasAll(['id', 'name', 'authorId', 'tracks']) &&
+      return data.keys().hasAll(['name', 'authorId', 'tracks']) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.authorId == request.auth.uid &&
-             data.tracks is list;
+             data.tracks is list &&
+             (data.keys().hasAny(['bpm']) ? data.bpm is number : true);
     }
 
     match /projects/{projectId} {

@@ -1,10 +1,10 @@
 import React from 'react';
 import { useStore, Track, Effect } from '../store/useStore';
-import { Power, X, ChevronDown, Sliders, Activity } from 'lucide-react';
+import { Power, X, ChevronDown, Sliders, Activity, Music } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function PluginRack() {
-  const { tracks, selectedTrackId, updateTrack } = useStore();
+  const { tracks, selectedTrackId, updateTrack, updateTrackInstrument } = useStore();
   const track = tracks.find(t => t.id === selectedTrackId);
 
   if (!track) {
@@ -38,10 +38,78 @@ export default function PluginRack() {
     });
   };
 
+  const handleInstrumentChange = (type: any) => {
+    const defaultSettings: any = {
+      'synth-mono': { cutoff: 1500, resonance: 2, attack: 0.05, release: 0.3 },
+      'synth-pad': { attack: 0.8, release: 1.5 },
+      'synth-lead': { cutoff: 2000, decay: 0.5 },
+      'drums': {}
+    };
+
+    updateTrack(track.id, {
+      instrument: {
+        id: uuidv4(),
+        name: type.replace('-', ' ').toUpperCase(),
+        type,
+        settings: defaultSettings[type] || {}
+      }
+    });
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Instrument Slot (MIDI Only) */}
+      {track.type === 'midi' && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2 px-1">
+            <span className="text-[10px] font-bold uppercase text-brand-orange tracking-wider">Virtual Instrument</span>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-700/50 rounded-xl p-4 shadow-xl">
+             <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-brand-orange/20 text-brand-orange rounded-lg flex items-center justify-center">
+                   <Music size={20} />
+                </div>
+                <div className="flex-1">
+                   <select 
+                     value={track.instrument?.type || 'synth-mono'}
+                     onChange={(e) => handleInstrumentChange(e.target.value)}
+                     className="w-full bg-zinc-950 border-zinc-800 text-white font-black uppercase text-[10px] tracking-widest rounded px-2 py-1 focus:ring-brand-orange"
+                   >
+                     <option value="synth-mono">Analog Mono Synth</option>
+                     <option value="synth-pad">Ethereal Pad</option>
+                     <option value="synth-lead">Screaming Lead</option>
+                     <option value="drums">Drum Machine V1</option>
+                   </select>
+                   <div className="text-[8px] text-zinc-600 font-bold uppercase mt-1">Professional VST Engine</div>
+                </div>
+             </div>
+
+             {/* Instrument Parameters */}
+             {track.instrument?.settings && (
+               <div className="grid grid-cols-2 gap-4">
+                  {Object.entries(track.instrument.settings).map(([key, value]) => (
+                    <div key={key} className="flex flex-col items-center gap-1 group">
+                       <span className="text-[8px] uppercase font-bold text-zinc-500 group-hover:text-zinc-300 transition-colors uppercase tracking-widest">{key}</span>
+                       <input 
+                         type="range" 
+                         min={0}
+                         max={key === 'cutoff' ? 5000 : key === 'resonance' ? 20 : 2}
+                         step={0.01}
+                         value={value as number}
+                         onChange={(e) => updateTrackInstrument(track.id, { [key]: parseFloat(e.target.value) })}
+                         className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-orange"
+                       />
+                       <span className="text-[8px] font-mono text-zinc-600">{(value as number).toFixed(2)}</span>
+                    </div>
+                  ))}
+               </div>
+             )}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-3 px-1">
-        <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Plugin Rack: {track.name}</span>
+        <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Plugin Rack (FX)</span>
         <button 
           onClick={addEffect}
           className="text-[9px] bg-brand-orange/20 text-brand-orange hover:bg-brand-orange hover:text-black px-2 py-0.5 rounded transition-all font-bold tracking-widest uppercase border border-brand-orange/30"
