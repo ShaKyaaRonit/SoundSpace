@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-orange: #f97316;
+  --color-bg-main: #090909;
+  --color-bg-surface: #121212;
+  --color-bg-sidebar: #111111;
+  --color-bg-accent: #1a1a1a;
+  --color-border-dim: #222222;
+  --color-border-brighter: #333333;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-main text-[#e0e0e0] antialiased;
+  }
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #090909;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #222222;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #333333;
+}
+
+/* Vertical Slider (Range Input) */
+input[type="range"].mix-slider {
+  background: transparent;
+}
+
+input[type="range"].mix-slider::-webkit-slider-runnable-track {
+  width: 4px;
+  height: 100%;
+  background: #050505;
+  border-radius: 2px;
+  border: 1px solid #222222;
+}
+
+input[type="range"].mix-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 28px;
+  height: 12px;
+  background: #333333;
+  border: 1px solid #555555;
+  border-radius: 2px;
+  cursor: ns-resize;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+  margin-top: -6px;
+}
+
+input[type="range"].mix-slider:hover::-webkit-slider-thumb {
+  background: #f97316;
+  border-color: #fb923c;
+}
+
+/* Horizontal Mixer Slider */
+input[type="range"] {
+  @apply accent-brand-orange cursor-pointer;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Grid Pattern for Timeline */
+.timeline-grid {
+  background-image: radial-gradient(#222 1px, transparent 1px);
+  background-size: 40px 40px;
+}

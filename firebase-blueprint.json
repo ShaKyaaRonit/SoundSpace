@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "Project": {
+      "title": "DAW Project",
+      "description": "Metadata for a DAW project including tracks and global settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "authorId": { "type": "string" },
+        "bpm": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "type": { "type": "string", "enum": ["audio", "midi"] },
+              "volume": { "type": "number" },
+              "pan": { "type": "number" },
+              "muted": { "type": "boolean" },
+              "soloed": { "type": "boolean" },
+              "regions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "startTime": { "type": "number" },
+                    "duration": { "type": "number" },
+                    "audioUrl": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "required": ["id", "name", "authorId", "tracks"]
+    }
+  },
+  "firestore": {
+    "projects": {
+      "schema": "Project",
+      "description": "Collection of DAW projects."
+    }
+  }
+}

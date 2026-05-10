@@ -1,0 +1,6 @@
+{
+  "name": "SoundSpace DAW",
+  "description": "A production-ready multi-track DAW clone with real-time audio visualization, synchronized playback, and cloud persistence.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["audio_processing", "cloud_storage"]
+}
