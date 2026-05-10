@@ -354,12 +354,12 @@ class AudioEngine {
     filter.type = 'lowpass';
     const cutoff = settings?.cutoff || 1500;
     filter.frequency.setValueAtTime(cutoff, ctx.currentTime);
-    // Filter Envelope
-    filter.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + duration);
+    // Filter Envelope: dynamic based on cutoff
+    filter.frequency.exponentialRampToValueAtTime(Math.max(20, cutoff * 0.1), ctx.currentTime + duration);
     filter.Q.value = settings?.resonance || 2;
 
-    const attack = settings?.attack || 0.05;
-    const release = settings?.release || 0.3;
+    const attack = settings?.attack ?? 0.05;
+    const release = settings?.release ?? 0.3;
     gain.gain.setValueAtTime(0, ctx.currentTime);
     gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + attack);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration + release);
@@ -382,73 +382,86 @@ class AudioEngine {
     // Polyphonic-ish feel with two detuned oscillators
     const osc1 = ctx.createOscillator();
     const osc2 = ctx.createOscillator();
+    const osc3 = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
 
+    const detune = settings?.detune ?? 0.005;
+
     osc1.type = 'sawtooth';
     osc2.type = 'sawtooth';
-    osc1.frequency.value = freq;
-    osc2.frequency.value = freq * 1.005; // Light detune
+    osc3.type = 'sine';
+    osc1.frequency.setValueAtTime(freq, ctx.currentTime);
+    osc2.frequency.setValueAtTime(freq * (1 + detune), ctx.currentTime);
+    osc3.frequency.setValueAtTime(freq * 0.5, ctx.currentTime); // Sub
 
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(800, ctx.currentTime);
+    filter.frequency.setValueAtTime(settings?.cutoff || 1200, ctx.currentTime);
     filter.Q.value = 1;
 
-    const attack = 0.8; // Long attack for pad
-    const release = 1.5;
+    const attack = settings?.attack ?? 0.8;
+    const release = settings?.release ?? 1.5;
     gain.gain.setValueAtTime(0, ctx.currentTime);
     gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + attack);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration + release);
 
     osc1.connect(filter);
     osc2.connect(filter);
-    filter.connect(gain);
-    gain.connect(destination);
-
-    osc1.start();
-    osc2.start();
-    osc1.stop(ctx.currentTime + duration + release);
-    osc1.stop(ctx.currentTime + duration + release);
-  }
-
-  private synthLead(midi: number, duration: number, destination: AudioNode, settings?: any) {
-    const ctx = this.getContext();
-    const freq = 440 * Math.pow(2, (midi - 69) / 12);
-    
-    // Triple oscillator for a thick sound
-    const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
-    const osc3 = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    osc1.type = 'sawtooth';
-    osc2.type = 'sawtooth';
-    osc3.type = 'sawtooth';
-    osc1.frequency.setValueAtTime(freq, ctx.currentTime);
-    osc2.frequency.setValueAtTime(freq * 1.01, ctx.currentTime);
-    osc3.frequency.setValueAtTime(freq * 0.99, ctx.currentTime);
-
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(3000, ctx.currentTime);
-    filter.frequency.exponentialRampToValueAtTime(1000, ctx.currentTime + duration);
-
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration + 0.1);
-
-    osc1.connect(filter);
-    osc2.connect(filter);
-    osc3.connect(filter);
+    osc3.connect(gain); // Sub bypasses filter for warmth
     filter.connect(gain);
     gain.connect(destination);
 
     osc1.start();
     osc2.start();
     osc3.start();
+    osc1.stop(ctx.currentTime + duration + release);
+    osc2.stop(ctx.currentTime + duration + release);
+    osc3.stop(ctx.currentTime + duration + release);
+  }
+
+  private synthLead(midi: number, duration: number, destination: AudioNode, settings?: any) {
+    const ctx = this.getContext();
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    // Vibrato LFO
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    lfo.frequency.value = settings?.vibrato ?? 5;
+    lfoGain.gain.value = 5;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc1.frequency);
+    lfoGain.connect(osc2.frequency);
+
+    osc1.type = 'sawtooth';
+    osc2.type = 'square';
+    osc1.frequency.setValueAtTime(freq, ctx.currentTime);
+    osc2.frequency.setValueAtTime(freq * 1.01, ctx.currentTime);
+
+    filter.type = 'lowpass';
+    const cutoff = settings?.cutoff ?? 2000;
+    filter.frequency.setValueAtTime(cutoff, ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(500, ctx.currentTime + (settings?.decay ?? 0.5));
+
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration + 0.1);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(destination);
+
+    lfo.start();
+    osc1.start();
+    osc2.start();
+    lfo.stop(ctx.currentTime + duration + 0.1);
     osc1.stop(ctx.currentTime + duration + 0.1);
     osc2.stop(ctx.currentTime + duration + 0.1);
-    osc3.stop(ctx.currentTime + duration + 0.1);
   }
 
   private drumTrigger(midi: number, destination: AudioNode) {

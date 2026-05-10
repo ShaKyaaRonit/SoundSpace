@@ -110,7 +110,7 @@ function MixerStrip({ track, onUpdate, isActive, onSelect }: { track: Track; onU
        {/* Real-time VST Parameters */}
        {track.instrument?.settings && (
          <div className="w-full px-2 mb-2 space-y-0.5">
-           {Object.entries(track.instrument.settings).slice(0, 2).map(([key, value]) => (
+           {Object.entries(track.instrument.settings).slice(0, 3).map(([key, value]) => (
              <div key={key} className="flex flex-col">
                <div className="flex justify-between items-center text-[7px] font-black text-zinc-600 uppercase tracking-widest leading-none">
                  <span>{key.substring(0, 3)}</span>

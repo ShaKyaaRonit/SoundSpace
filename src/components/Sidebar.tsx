@@ -15,6 +15,23 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
   const { addTrack, addRegion, tracks, currentTime, setProcessing } = useStore();
   const [activeTab, setActiveTab] = useState<'loops' | 'ai' | 'instruments' | 'rack'>('instruments');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [vstSearch, setVstSearch] = useState('');
+
+  const VST_PLUGINS = [
+    { id: 'synth-mono', name: 'Analog Mono Synth', type: 'synth-mono', category: 'Synth', description: 'Subtractive Engine', icon: Zap, color: 'text-brand-orange', bg: 'bg-brand-orange/10', border: 'hover:border-brand-orange' },
+    { id: 'synth-pad', name: 'Galactic Pad V1', type: 'synth-pad', category: 'Ambient', description: 'Atmospheric Texture', icon: Cloud, color: 'text-emerald-500', bg: 'bg-emerald-500/10', border: 'hover:border-emerald-500' },
+    { id: 'synth-lead', name: 'Neon Lead', type: 'synth-lead', category: 'Lead', description: 'Phase Distortion', icon: Wand2, color: 'text-indigo-500', bg: 'bg-indigo-500/10', border: 'hover:border-indigo-500' },
+    { id: 'drums-retro', name: 'Retro Beats', type: 'drums', category: 'Drums', description: '808/909 Physical Logic', icon: Activity, color: 'text-red-500', bg: 'bg-red-500/10', border: 'hover:border-red-500' },
+    { id: 'bass-mono', name: 'Deep Bass Mono', type: 'synth-mono', category: 'Bass', description: 'Raw Analog Power', icon: Activity, color: 'text-orange-500', bg: 'bg-orange-500/10', border: 'hover:border-orange-500' },
+    { id: 'chill-pad', name: 'Dreamy Rhodes', type: 'synth-pad', category: 'Keys', description: 'Electric Piano Simulation', icon: Music, color: 'text-cyan-500', bg: 'bg-cyan-500/10', border: 'hover:border-cyan-500' },
+    { id: 'strings-ensemble', name: 'String Machine', type: 'synth-pad', category: 'Orchestral', description: 'Vintage Solina Style', icon: Layers, color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'hover:border-amber-500' },
+    { id: 'fm-bell', name: 'Crystal FM', type: 'synth-lead', category: 'Bells', description: '4-Operator FM Engine', icon: Wand2, color: 'text-blue-400', bg: 'bg-blue-400/10', border: 'hover:border-blue-400' },
+  ];
+
+  const filteredVsts = VST_PLUGINS.filter(vst => 
+    vst.name.toLowerCase().includes(vstSearch.toLowerCase()) || 
+    vst.category.toLowerCase().includes(vstSearch.toLowerCase())
+  );
 
   const selectedTrackId = useStore(state => state.selectedTrackId);
   const selectedTrack = tracks.find(t => t.id === selectedTrackId);
@@ -205,81 +222,44 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
           </>
         ) : activeTab === 'instruments' ? (
            <div className="flex flex-col gap-4 animate-in slide-in-from-left duration-300">
-             <div className="text-[10px] text-zinc-700 font-bold uppercase mb-2 tracking-widest">Pro Virtual Instruments</div>
+             <div className="relative group">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 group-focus-within:text-brand-orange transition-colors" />
+                <input 
+                  value={vstSearch}
+                  onChange={(e) => setVstSearch(e.target.value)}
+                  placeholder="Search VSTs & Pianos..."
+                  className="w-full bg-[#050505] border border-border-brighter rounded px-3 py-1.5 text-xs focus:border-brand-orange focus:outline-none transition-all placeholder:text-zinc-700"
+                />
+             </div>
+
+             <div className="text-[10px] text-zinc-700 font-bold uppercase mb-2 tracking-widest px-1">Pro Virtual Instruments</div>
              
-             <div 
-               onClick={() => handleLoadInstrument('synth-mono', 'Deep Bass Mono')}
-               className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl group hover:border-brand-orange transition-all cursor-pointer"
-             >
-                <div className="flex items-center gap-3 mb-3">
-                   <div className="w-8 h-8 bg-brand-orange/10 text-brand-orange rounded-lg flex items-center justify-center">
-                     <Zap size={16} />
-                   </div>
-                   <div>
-                     <div className="text-xs font-bold text-white uppercase tracking-tight">Analog Mono Synth</div>
-                     <div className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Subtractive Engine</div>
-                   </div>
-                </div>
-                <div className="flex gap-1 h-3">
-                   <div className="flex-1 bg-zinc-800 rounded-full overflow-hidden">
-                      <div className="w-[60%] h-full bg-brand-orange/40" />
-                   </div>
-                </div>
-             </div>
-
-             <div 
-               onClick={() => handleLoadInstrument('synth-pad', 'Galactic Pad')}
-               className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl group hover:border-emerald-500 transition-all cursor-pointer"
-             >
-                <div className="flex items-center gap-3 mb-3">
-                   <div className="w-8 h-8 bg-emerald-500/10 text-emerald-500 rounded-lg flex items-center justify-center">
-                     <Cloud size={16} />
-                   </div>
-                   <div>
-                     <div className="text-xs font-bold text-white uppercase tracking-tight">Ethereal Pad V1</div>
-                     <div className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Atmospheric Texture</div>
-                   </div>
-                </div>
-                <div className="flex gap-1 h-3">
-                   <div className="flex-1 bg-zinc-800 rounded-full overflow-hidden">
-                      <div className="w-[85%] h-full bg-emerald-500/40" />
-                   </div>
-                </div>
-             </div>
-
-             <div 
-               onClick={() => handleLoadInstrument('synth-lead', 'Neon Lead')}
-               className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl group hover:border-indigo-500 transition-all cursor-pointer"
-             >
-                <div className="flex items-center gap-3 mb-3">
-                   <div className="w-8 h-8 bg-indigo-500/10 text-indigo-500 rounded-lg flex items-center justify-center">
-                     <Wand2 size={16} />
-                   </div>
-                   <div>
-                     <div className="text-xs font-bold text-white uppercase tracking-tight">Cinematic Lead</div>
-                     <div className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Phase Distortion</div>
-                   </div>
-                </div>
-                <div className="flex gap-1 h-3">
-                   <div className="flex-1 bg-zinc-800 rounded-full overflow-hidden">
-                      <div className="w-[40%] h-full bg-indigo-500/40" />
-                   </div>
-                </div>
-             </div>
-
-             <div 
-               onClick={() => handleLoadInstrument('drums', 'Retro Beats')}
-               className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl group hover:border-red-500 transition-all cursor-pointer"
-             >
-                <div className="flex items-center gap-3 mb-3">
-                   <div className="w-8 h-8 bg-red-500/10 text-red-500 rounded-lg flex items-center justify-center">
-                     <Activity size={16} strokeWidth={3} />
-                   </div>
-                   <div>
-                     <div className="text-xs font-bold text-white uppercase tracking-tight">Drum Machine Pro</div>
-                     <div className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">808/909 Physical Logic</div>
-                   </div>
-                </div>
+             <div className="space-y-3 overflow-y-auto max-h-[60vh] pr-1">
+               {filteredVsts.length === 0 ? (
+                 <div className="text-[10px] text-zinc-600 italic text-center py-8">No matching instruments found.</div>
+               ) : (
+                 filteredVsts.map((vst) => (
+                    <div 
+                      key={vst.id}
+                      onClick={() => handleLoadInstrument(vst.type, vst.name)}
+                      className={`p-4 bg-zinc-900 border border-zinc-800 rounded-xl group transition-all cursor-pointer ${vst.border}`}
+                    >
+                       <div className="flex items-center gap-3 mb-3">
+                          <div className={`w-8 h-8 ${vst.bg} ${vst.color} rounded-lg flex items-center justify-center`}>
+                            <vst.icon size={16} />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-white uppercase tracking-tight">{vst.name}</div>
+                            <div className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">{vst.description}</div>
+                          </div>
+                       </div>
+                       <div className="flex justify-between items-center">
+                          <div className="px-1.5 py-0.5 bg-zinc-800/50 rounded text-[8px] font-black text-zinc-500 uppercase tracking-widest">{vst.category}</div>
+                          <button className="text-[9px] font-black text-brand-orange opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-tighter">Load Engine</button>
+                       </div>
+                    </div>
+                 ))
+               )}
              </div>
            </div>
         ) : activeTab === 'rack' ? (
