@@ -13,7 +13,7 @@ import Sidebar from './components/Sidebar';
 import PianoRoll from './components/PianoRoll/PianoRoll';
 
 export default function App() {
-  const { isPlaying, setCurrentTime, metronomeEnabled, bpm, setMetronome, snapEnabled, setSnap, selectedRegionId, deleteRegion, selectedTrackId, activeTool, setTool, addTrack, notify } = useStore();
+  const { isPlaying, setCurrentTime, metronomeEnabled, setMetronome, snapEnabled, setSnap, selectedRegionId, deleteRegion, selectedTrackId, activeTool, setTool, addTrack, notify } = useStore();
   const requestRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const lastBeatRef = useRef<number>(-1);
@@ -52,6 +52,20 @@ export default function App() {
         case 'KeyS':
           setSnap(!snapEnabled);
           break;
+        case 'KeyL': {
+          const state = useStore.getState();
+          state.setLoopEnabled(!state.loopEnabled);
+          notify(state.loopEnabled ? 'Loop disabled.' : 'Loop enabled.', 'info');
+          break;
+        }
+        case 'KeyD':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (selectedRegionId && useStore.getState().duplicateRegion(selectedRegionId)) {
+              notify('Clip duplicated.', 'success');
+            }
+          }
+          break;
         case 'Backspace':
         case 'Delete':
           if (selectedRegionId && selectedTrackId) {
@@ -74,7 +88,12 @@ export default function App() {
     if (state.isPlaying) {
       if (lastTimeRef.current > 0) {
         const deltaTime = (time - lastTimeRef.current) / 1000;
-        const nextTime = state.currentTime + deltaTime;
+        let nextTime = state.currentTime + deltaTime;
+        if (state.loopEnabled && nextTime >= state.loopEnd) {
+          nextTime = state.loopStart;
+          lastBeatRef.current = -1;
+          audioEngine.play(state.loopStart, state.tracks);
+        }
         setCurrentTime(nextTime);
 
         if (state.metronomeEnabled) {

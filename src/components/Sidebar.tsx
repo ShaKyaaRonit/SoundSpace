@@ -3,7 +3,7 @@ import { Music, Search, Cloud, Layers, PlusCircle, Mic, Wand2, Loader2, PlayCirc
 import { v4 as uuidv4 } from 'uuid';
 import { useStore } from '../store/useStore';
 import { audioEngine } from '../lib/audio-engine';
-import { aiService } from '../services/aiService';
+import { aiService, type ArrangementPlan, type ArrangementTrack } from '../services/aiService';
 
 const SAMPLE_LOOPS = [
   { id: '1', name: 'Vintage Drums', url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3', duration: 4 },
@@ -12,10 +12,13 @@ const SAMPLE_LOOPS = [
 ];
 
 export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) {
-  const { addTrack, addRegion, tracks, currentTime, setProcessing, notify } = useStore();
+  const { addTrack, addRegion, tracks, currentTime, setProcessing, notify, setBpm, selectedRegionId } = useStore();
   const [activeTab, setActiveTab] = useState<'loops' | 'ai' | 'instruments' | 'rack'>('instruments');
   const [isGenerating, setIsGenerating] = useState(false);
   const [vstSearch, setVstSearch] = useState('');
+  const [aiStyle, setAiStyle] = useState('Cyberpunk lo-fi');
+  const [aiTempo, setAiTempo] = useState(90);
+  const [aiInstruments, setAiInstruments] = useState('glitch drums, sub bass, warm pads, simple hook');
 
   const VST_PLUGINS = [
     { id: 'synth-mono', name: 'Analog Mono Synth', type: 'synth-mono', category: 'Synth', description: 'Subtractive Engine', icon: Zap, color: 'text-brand-orange', bg: 'bg-brand-orange/10', border: 'hover:border-brand-orange' },
@@ -110,42 +113,54 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
 
   const handleGenerateSong = async () => {
     setIsGenerating(true);
-    setProcessing(true, 'Generating starter stems...');
+    setProcessing(true, 'Generating editable arrangement...');
     try {
-      await aiService.generateSongPrompt("Cyberpunk lo-fi", 90, "Smooth synths, glitchy drums");
-      
-      // Professional Stems with actual logic
-      const stems = [
-        { name: 'Drum Kit', url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3' },
-        { name: 'Sub Bass', url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3' },
-        { name: 'Neon Arp', url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3' },
-        { name: 'FX Atmos', url: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3' }
-      ];
-
-      for (const stem of stems) {
-        const targetTrackId = addTrack(stem.name, 'audio');
-        
-        try {
-          const buffer = await audioEngine.loadAudio(stem.url);
-          addRegion(targetTrackId, {
-            startTime: 0,
-            duration: buffer.duration,
-            audioUrl: stem.url,
-            buffer,
-            name: stem.name
-          });
-        } catch (err) {
-          notify(`Could not load ${stem.name}.`, 'error');
-        }
+      let arrangement: ArrangementPlan;
+      try {
+        arrangement = await aiService.generateArrangement(aiStyle, aiTempo, aiInstruments);
+        notify('AI generated an editable MIDI arrangement.', 'success');
+      } catch {
+        arrangement = createFallbackArrangement(aiStyle, aiTempo);
+        notify('AI service is unavailable, so a local producer starter was created.', 'info');
       }
-      notify('Starter stems added to the timeline.', 'success');
+
+      addArrangementToProject(arrangement);
     } catch {
-      notify('AI stem generation failed. Check the Gemini key and try again.', 'error');
+      notify('Arrangement generation failed. Try a simpler prompt.', 'error');
     } finally {
       setIsGenerating(false);
       setProcessing(false);
     }
   };
+
+  function addArrangementToProject(arrangement: ArrangementPlan) {
+    const bpm = Math.round(Math.min(240, Math.max(40, arrangement.bpm || aiTempo)));
+    const bars = Math.min(16, Math.max(4, Math.round(arrangement.bars || 8)));
+    const durationSeconds = bars * 4 * (60 / bpm);
+    setBpm(bpm);
+
+    arrangement.tracks
+      .filter(track => track.notes?.length)
+      .slice(0, 8)
+      .forEach(track => {
+        const instrumentType = normalizeInstrument(track.instrument);
+        const trackId = addTrack(track.name || arrangement.title || 'AI Part', 'midi');
+        useStore.getState().updateTrack(trackId, {
+          instrument: {
+            id: uuidv4(),
+            name: track.name || instrumentType,
+            type: instrumentType,
+            settings: getDefaultInstrumentSettings(instrumentType)
+          }
+        });
+        addRegion(trackId, {
+          startTime: 0,
+          duration: durationSeconds,
+          name: track.name || 'AI MIDI Part',
+          notes: sanitizeArrangementNotes(track)
+        });
+      });
+  }
 
   return (
     <div className="w-72 border-l border-border-dim bg-bg-sidebar flex flex-col hidden lg:flex">
@@ -286,17 +301,21 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
                                <div key={key} className="space-y-1">
                                  <div className="flex justify-between items-center text-[8px] font-black text-zinc-500 uppercase tracking-widest">
                                    <span>{key}</span>
-                                   <span className="text-brand-orange font-mono">{(value as number).toFixed(2)}</span>
+                                   <span className="text-brand-orange font-mono">{typeof value === 'number' ? value.toFixed(2) : String(value)}</span>
                                  </div>
-                                 <input 
-                                   type="range" 
-                                   min={0}
-                                   max={key === 'cutoff' ? 5000 : key === 'resonance' ? 20 : 2}
-                                   step={0.01}
-                                   value={value as number}
-                                   onChange={(e) => updateTrackInstrument(selectedTrack.id, { [key]: parseFloat(e.target.value) })}
-                                   className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-brand-orange"
-                                 />
+                                 {typeof value === 'number' ? (
+                                   <input 
+                                     type="range" 
+                                     min={0}
+                                     max={key === 'cutoff' ? 5000 : key === 'resonance' ? 20 : 2}
+                                     step={0.01}
+                                     value={value}
+                                     onChange={(e) => updateTrackInstrument(selectedTrack.id, { [key]: parseFloat(e.target.value) })}
+                                     className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-brand-orange"
+                                   />
+                                 ) : (
+                                   <div className="h-1 rounded bg-zinc-950" />
+                                 )}
                                </div>
                              ))}
                            </div>
@@ -332,14 +351,34 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
            </div>
         ) : (
           <div className="flex flex-col gap-4 animate-in slide-in-from-right duration-300">
-            <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg">
+            <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg space-y-3">
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-2 h-2 rounded-full bg-brand-orange animate-pulse" />
                 <span className="text-[10px] font-black text-brand-orange uppercase tracking-[0.2em]">Neural Processing</span>
               </div>
-              <p className="text-[10px] text-zinc-500 leading-relaxed italic">
-                "Lyria 3 Engine is active. Use the tools below for deep neural manipulation of your project."
-              </p>
+              <input
+                value={aiStyle}
+                onChange={(e) => setAiStyle(e.target.value)}
+                className="w-full bg-black/50 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:border-brand-orange focus:outline-none"
+                placeholder="Style"
+              />
+              <div className="grid grid-cols-[70px_1fr] gap-2">
+                <input
+                  type="number"
+                  min={40}
+                  max={240}
+                  value={aiTempo}
+                  onChange={(e) => setAiTempo(parseInt(e.target.value, 10) || 90)}
+                  className="bg-black/50 border border-zinc-800 rounded px-2 py-2 text-xs text-brand-orange font-mono focus:border-brand-orange focus:outline-none"
+                  aria-label="BPM"
+                />
+                <input
+                  value={aiInstruments}
+                  onChange={(e) => setAiInstruments(e.target.value)}
+                  className="bg-black/50 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-200 focus:border-brand-orange focus:outline-none"
+                  placeholder="Instruments"
+                />
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -352,38 +391,41 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
                   {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
                 </div>
                 <div className="flex flex-col items-start text-left">
-                  <span className="text-[11px] font-bold text-white group-hover:text-brand-orange">Stem Generation</span>
-                  <span className="text-[9px] text-zinc-600 truncate w-40">Create 4-stems from prompt</span>
+                  <span className="text-[11px] font-bold text-white group-hover:text-brand-orange">AI Composer</span>
+                  <span className="text-[9px] text-zinc-600 truncate w-40">Create editable MIDI parts</span>
                 </div>
               </button>
 
               <button 
                 onClick={async () => {
-                   setProcessing(true, 'Creating isolated stems...');
+                   setProcessing(true, 'Preparing stem lanes...');
                    setIsGenerating(true);
                    try {
-                     const stemNames = ['Vocals', 'Drums', 'Bass', 'Vines & Pianos'];
-                     const url = 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3';
+                     const selectedAudioRegion = tracks
+                       .flatMap(track => track.regions.map(region => ({ region, track })))
+                       .find(item => item.region.id === selectedRegionId && item.track.type === 'audio' && (item.region.buffer || item.region.audioUrl));
+
+                     if (!selectedAudioRegion) {
+                       notify('Select an audio clip first to prepare stem lanes.', 'info');
+                       return;
+                     }
+
+                     const stemNames = ['Vocals', 'Drums', 'Bass', 'Keys & FX'];
                      
                      for (const name of stemNames) {
-                        const targetTrackId = addTrack(name + " (AI Isolated)", 'audio');
-                        
-                        try {
-                          const buffer = await audioEngine.loadAudio(url);
-                          addRegion(targetTrackId, {
-                            startTime: 0,
-                            duration: buffer.duration,
-                            audioUrl: url,
-                            buffer,
-                            name
-                          });
-                        } catch (err) {
-                           notify(`Could not isolate ${name}.`, 'error');
-                        }
+                        const targetTrackId = addTrack(name + " (Stem Lane)", 'audio');
+                        addRegion(targetTrackId, {
+                          startTime: selectedAudioRegion.region.startTime,
+                          duration: selectedAudioRegion.region.duration,
+                          audioUrl: selectedAudioRegion.region.audioUrl,
+                          buffer: selectedAudioRegion.region.buffer,
+                          clipOffset: selectedAudioRegion.region.clipOffset,
+                          name
+                        });
                      }
-                     notify('Isolation stems added.', 'success');
+                     notify('Prepared stem lanes from the selected clip. True source separation still needs a hosted separation model.', 'info');
                    } catch {
-                     notify('Source isolation failed.', 'error');
+                     notify('Stem lane setup failed.', 'error');
                    } finally {
                      setIsGenerating(false);
                      setProcessing(false);
@@ -397,7 +439,7 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
                 </div>
                 <div className="flex flex-col items-start text-left">
                   <span className="text-[11px] font-bold text-white group-hover:text-emerald-500">Source Isolation</span>
-                  <span className="text-[9px] text-zinc-600 truncate w-40">Split songs into 4 stems</span>
+                  <span className="text-[9px] text-zinc-600 truncate w-40">Prepare editable stem lanes</span>
                 </div>
               </button>
 
@@ -438,4 +480,72 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
       </div>
     </div>
   );
+}
+
+function normalizeInstrument(type: ArrangementTrack['instrument']) {
+  return ['synth-mono', 'synth-pad', 'synth-lead', 'drums'].includes(type)
+    ? type
+    : 'synth-mono';
+}
+
+function getDefaultInstrumentSettings(type: ArrangementTrack['instrument']) {
+  const settings: Record<ArrangementTrack['instrument'], Record<string, number | string>> = {
+    'synth-mono': { cutoff: 900, resonance: 4, attack: 0.02, release: 0.25, oscType: 'sawtooth' },
+    'synth-pad': { cutoff: 1800, attack: 0.8, release: 1.8, detune: 0.01 },
+    'synth-lead': { cutoff: 2600, decay: 0.4, vibrato: 5 },
+    drums: {}
+  };
+  return settings[type] || settings['synth-mono'];
+}
+
+function sanitizeArrangementNotes(track: ArrangementTrack) {
+  return track.notes
+    .filter(note => Number.isFinite(note.midi) && Number.isFinite(note.startTime) && Number.isFinite(note.duration))
+    .map(note => ({
+      id: uuidv4(),
+      midi: Math.min(108, Math.max(24, Math.round(note.midi))),
+      startTime: Math.max(0, note.startTime),
+      duration: Math.max(0.125, note.duration),
+      velocity: Math.min(127, Math.max(1, Math.round(note.velocity || 90)))
+    }));
+}
+
+function createFallbackArrangement(style: string, bpm: number): ArrangementPlan {
+  const bars = 8;
+  const chordRoots = /dark|minor|trap|cyber|lo-fi/i.test(style) ? [57, 53, 55, 52] : [60, 67, 69, 65];
+  const chordNotes = chordRoots.flatMap((root, index) => [root, root + 3, root + 7].map(midi => ({
+    midi,
+    startTime: index * 8,
+    duration: 7.5,
+    velocity: 82
+  })));
+  const bassNotes = chordRoots.flatMap((root, index) => [0, 2, 4, 6].map(step => ({
+    midi: root - 24,
+    startTime: index * 8 + step,
+    duration: 1.5,
+    velocity: 98
+  })));
+  const drumNotes = Array.from({ length: bars * 4 }).flatMap((_, beat) => [
+    ...(beat % 4 === 0 ? [{ midi: 36, startTime: beat, duration: 0.25, velocity: 120 }] : []),
+    ...(beat % 4 === 2 ? [{ midi: 38, startTime: beat, duration: 0.25, velocity: 105 }] : []),
+    { midi: 42, startTime: beat + 0.5, duration: 0.1, velocity: beat % 2 === 0 ? 80 : 62 }
+  ]);
+  const hookNotes = [72, 74, 75, 79, 77, 75, 74, 70].map((midi, index) => ({
+    midi,
+    startTime: index * 2,
+    duration: 1,
+    velocity: 88
+  }));
+
+  return {
+    title: `${style || 'Producer'} Starter`,
+    bpm,
+    bars,
+    tracks: [
+      { name: 'AI Drums', instrument: 'drums', notes: drumNotes },
+      { name: 'AI Sub Bass', instrument: 'synth-mono', notes: bassNotes },
+      { name: 'AI Chords', instrument: 'synth-pad', notes: chordNotes },
+      { name: 'AI Hook', instrument: 'synth-lead', notes: hookNotes }
+    ]
+  };
 }

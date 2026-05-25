@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Volume2, VolumeX, Mic, MoreVertical, Hash, Wand2, Loader2 } from 'lucide-react';
+import { Mic, Wand2, Trash2 } from 'lucide-react';
 import { useStore, Track } from '../store/useStore';
 import { aiService } from '../services/aiService';
 
 export default function TrackHeaders() {
-  const { tracks, updateTrack, selectedTrackId, setSelectedRegion } = useStore();
+  const { tracks, updateTrack, removeTrack, selectedTrackId, setSelectedRegion, notify } = useStore();
 
   return (
     <div className="flex flex-col">
@@ -19,18 +19,23 @@ export default function TrackHeaders() {
             setSelectedRegion(null); // Clear region selection when selecting track
           }}
           onUpdate={(updates) => updateTrack(track.id, updates)}
+          onRemove={() => {
+            removeTrack(track.id);
+            notify(`${track.name} removed.`, 'info');
+          }}
         />
       ))}
     </div>
   );
 }
 
-function TrackHeaderItem({ track, index, isActive, onUpdate, onSelect }: { 
+function TrackHeaderItem({ track, index, isActive, onUpdate, onSelect, onRemove }: { 
   track: Track; 
   index: number; 
   isActive: boolean;
   onUpdate: (updates: Partial<Track>) => void;
   onSelect: () => void;
+  onRemove: () => void;
   key?: string;
 }) {
   const [isBalancing, setIsBalancing] = useState(false);
@@ -72,8 +77,12 @@ function TrackHeaderItem({ track, index, isActive, onUpdate, onSelect }: {
             {track.instrument?.name || 'Instrument'}
           </span>
         )}
-        <button className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-zinc-200 transition-opacity">
-          <MoreVertical size={14} />
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-red-400 transition-opacity"
+          title="Remove track"
+        >
+          <Trash2 size={14} />
         </button>
       </div>
 

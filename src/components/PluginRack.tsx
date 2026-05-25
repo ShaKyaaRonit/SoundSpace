@@ -4,7 +4,7 @@ import { Power, X, ChevronDown, Sliders, Activity, Music, Zap } from 'lucide-rea
 import { v4 as uuidv4 } from 'uuid';
 
 export default function PluginRack() {
-  const { tracks, selectedTrackId, updateTrack, updateTrackInstrument } = useStore();
+  const { tracks, selectedTrackId, updateTrack, updateTrackInstrument, notify } = useStore();
   const track = tracks.find(t => t.id === selectedTrackId);
 
   if (!track) {
@@ -16,14 +16,15 @@ export default function PluginRack() {
     );
   }
 
-  const addEffect = () => {
+  const addEffect = (type: Effect['type']) => {
     const newEffect: Effect = {
       id: uuidv4(),
-      type: 'eq',
-      params: { gain: 0, freq: 1000 },
+      type,
+      params: getDefaultEffectParams(type),
       enabled: true
     };
     updateTrack(track.id, { effects: [...(track.effects || []), newEffect] });
+    notify(`${type.toUpperCase()} added to ${track.name}.`, 'success');
   };
 
   const toggleEffect = (effectId: string) => {
@@ -35,6 +36,15 @@ export default function PluginRack() {
   const removeEffect = (effectId: string) => {
     updateTrack(track.id, {
       effects: track.effects.filter(e => e.id !== effectId)
+    });
+  };
+
+  const updateEffectParam = (effectId: string, key: string, value: number) => {
+    updateTrack(track.id, {
+      effects: track.effects.map(effect => effect.id === effectId
+        ? { ...effect, params: { ...effect.params, [key]: value } }
+        : effect
+      )
     });
   };
 
@@ -130,18 +140,22 @@ export default function PluginRack() {
                     <div key={key} className="flex flex-col gap-1.5 group/param">
                        <div className="flex justify-between items-center transition-opacity">
                          <span className="text-[8px] uppercase font-black text-zinc-500 group-hover/param:text-zinc-300 transition-colors tracking-widest leading-none">{key}</span>
-                         <span className="text-[9px] font-mono text-brand-orange/60 font-bold leading-none">{(value as number).toFixed(2)}</span>
+                         <span className="text-[9px] font-mono text-brand-orange/60 font-bold leading-none">{typeof value === 'number' ? value.toFixed(2) : String(value)}</span>
                        </div>
                        <div className="relative h-4 flex items-center">
-                          <input 
-                            type="range" 
-                            min={0}
-                            max={key === 'cutoff' ? 5000 : key === 'resonance' ? 20 : key === 'detune' ? 0.05 : 2}
-                            step={key === 'detune' ? 0.001 : 0.01}
-                            value={value as number}
-                            onChange={(e) => updateTrackInstrument(track.id, { [key]: parseFloat(e.target.value) })}
-                            className="w-full h-1 bg-zinc-950 rounded-full appearance-none cursor-pointer accent-brand-orange group-hover/param:bg-zinc-900 transition-all"
-                          />
+                          {typeof value === 'number' ? (
+                            <input 
+                              type="range" 
+                              min={0}
+                              max={key === 'cutoff' ? 5000 : key === 'resonance' ? 20 : key === 'detune' ? 0.05 : 2}
+                              step={key === 'detune' ? 0.001 : 0.01}
+                              value={value}
+                              onChange={(e) => updateTrackInstrument(track.id, { [key]: parseFloat(e.target.value) })}
+                              className="w-full h-1 bg-zinc-950 rounded-full appearance-none cursor-pointer accent-brand-orange group-hover/param:bg-zinc-900 transition-all"
+                            />
+                          ) : (
+                            <div className="w-full h-1 bg-zinc-950 rounded-full" />
+                          )}
                           {/* Visual ticks */}
                           <div className="absolute inset-0 flex justify-between items-center px-1 pointer-events-none opacity-20 group-hover/param:opacity-40 transition-opacity">
                             {[...Array(6)].map((_, i) => <div key={i} className="w-[1px] h-2 bg-zinc-600 rounded-full" />)}
@@ -157,12 +171,17 @@ export default function PluginRack() {
 
       <div className="flex items-center justify-between mb-3 px-1">
         <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Plugin Rack (FX)</span>
-        <button 
-          onClick={addEffect}
-          className="text-[9px] bg-brand-orange/20 text-brand-orange hover:bg-brand-orange hover:text-black px-2 py-0.5 rounded transition-all font-bold tracking-widest uppercase border border-brand-orange/30"
-        >
-          Add FX
-        </button>
+        <div className="flex gap-1">
+          {(['eq', 'compressor', 'delay', 'reverb', 'limiter'] as Effect['type'][]).map(type => (
+            <button 
+              key={type}
+              onClick={() => addEffect(type)}
+              className="text-[8px] bg-brand-orange/10 text-brand-orange hover:bg-brand-orange hover:text-black px-1.5 py-0.5 rounded transition-all font-bold tracking-widest uppercase border border-brand-orange/20"
+            >
+              {type === 'compressor' ? 'Comp' : type}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -183,23 +202,23 @@ export default function PluginRack() {
             </div>
             
             <div className="p-3 space-y-3 bg-black/20">
-              {/* Parameter Dials Simulation */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col items-center gap-1">
-                  <div className="w-10 h-10 rounded-full border-2 border-zinc-800 relative flex items-center justify-center bg-zinc-900 shadow-inner group/knob">
-                    <div className="w-1 h-3 bg-brand-orange/60 absolute top-1 rounded-full origin-bottom -rotate-45" />
-                    <span className="text-[8px] font-mono text-zinc-500 mt-1">45%</span>
+              {Object.entries(effect.params || {}).map(([key, value]) => (
+                <div key={key} className="space-y-1">
+                  <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-zinc-500">
+                    <span>{key}</span>
+                    <span className="font-mono text-brand-orange/70">{Number(value).toFixed(2)}</span>
                   </div>
-                  <span className="text-[7px] uppercase font-bold text-zinc-600 tracking-tighter">Amount</span>
+                  <input
+                    type="range"
+                    min={getEffectParamRange(effect.type, key).min}
+                    max={getEffectParamRange(effect.type, key).max}
+                    step={getEffectParamRange(effect.type, key).step}
+                    value={Number(value)}
+                    onChange={(e) => updateEffectParam(effect.id, key, parseFloat(e.target.value))}
+                    className="w-full h-1 bg-zinc-950 rounded-full appearance-none cursor-pointer accent-brand-orange"
+                  />
                 </div>
-                <div className="flex flex-col items-center gap-1">
-                  <div className="w-10 h-10 rounded-full border-2 border-zinc-800 relative flex items-center justify-center bg-zinc-900 shadow-inner group/knob">
-                    <div className="w-1 h-3 bg-emerald-500/60 absolute top-1 rounded-full origin-bottom rotate-12" />
-                    <span className="text-[8px] font-mono text-zinc-500 mt-1">12ms</span>
-                  </div>
-                  <span className="text-[7px] uppercase font-bold text-zinc-600 tracking-tighter">Time</span>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         ))}
@@ -213,4 +232,35 @@ export default function PluginRack() {
       </div>
     </div>
   );
+}
+
+function getDefaultEffectParams(type: Effect['type']) {
+  switch (type) {
+    case 'eq':
+      return { freq: 1000, gain: 3, q: 1 };
+    case 'compressor':
+      return { threshold: -18, ratio: 4, attack: 0.01, release: 0.2 };
+    case 'delay':
+      return { time: 0.18 };
+    case 'reverb':
+      return { decay: 1.4 };
+    case 'limiter':
+      return { ceiling: -1 };
+    default:
+      return {};
+  }
+}
+
+function getEffectParamRange(type: Effect['type'], key: string) {
+  if (key === 'freq') return { min: 80, max: 12000, step: 10 };
+  if (key === 'gain') return { min: -12, max: 12, step: 0.1 };
+  if (key === 'q') return { min: 0.1, max: 12, step: 0.1 };
+  if (key === 'threshold') return { min: -48, max: 0, step: 0.5 };
+  if (key === 'ratio') return { min: 1, max: 20, step: 0.1 };
+  if (key === 'attack') return { min: 0.001, max: 0.2, step: 0.001 };
+  if (key === 'release') return { min: 0.02, max: 1, step: 0.01 };
+  if (key === 'time') return { min: 0.02, max: 0.8, step: 0.01 };
+  if (key === 'decay') return { min: 0.2, max: 4, step: 0.1 };
+  if (key === 'ceiling') return { min: -12, max: 0, step: 0.1 };
+  return type === 'limiter' ? { min: -12, max: 0, step: 0.1 } : { min: 0, max: 1, step: 0.01 };
 }

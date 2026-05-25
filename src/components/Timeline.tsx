@@ -1,9 +1,9 @@
-import React, { useRef, useEffect } from 'react';
-import { useStore, Track, Region } from '../store/useStore';
+import React, { useRef } from 'react';
+import { useStore, Region } from '../store/useStore';
 import { audioEngine } from '../lib/audio-engine';
-import { Wand2, Scissors, Music, Layers, Loader2 } from 'lucide-react';
+import { Wand2, Loader2 } from 'lucide-react';
 import Waveform from './Visualizers/Waveform';
-import { v4 as uuidv4 } from 'uuid';
+import { importAudioFiles } from '../lib/audio-import';
 
 const PIXELS_PER_SECOND = 40;
 const TRACK_HEIGHT = 100;
@@ -27,11 +27,27 @@ export default function Timeline() {
     }
   };
 
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!containerRef.current || !e.dataTransfer.files.length) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left + containerRef.current.scrollLeft;
+    const y = e.clientY - rect.top + containerRef.current.scrollTop - 32;
+    const targetTrack = tracks[Math.max(0, Math.floor(y / TRACK_HEIGHT))];
+    await importAudioFiles(Array.from(e.dataTransfer.files), {
+      startTime: Math.max(0, x / PIXELS_PER_SECOND),
+      trackId: targetTrack?.type === 'audio' ? targetTrack.id : undefined
+    });
+  };
+
   return (
     <div 
       ref={containerRef}
       className="flex-1 overflow-auto relative custom-scrollbar timeline-grid"
       onClick={handleTimelineClick}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={handleDrop}
     >
       {/* AI Processing Overlay */}
       {isProcessing && (
@@ -94,7 +110,7 @@ export default function Timeline() {
 }
 
 function AudioRegion({ region, trackId }: { region: Region; trackId: string; key?: string }) {
-  const { updateTrack, tracks, setActiveRegion, selectedRegionId, setSelectedRegion, setProcessing, addTrack, addRegion, notify } = useStore();
+  const { tracks, setActiveRegion, selectedRegionId, setSelectedRegion, setProcessing, addTrack, addRegion, updateRegion, splitRegion, notify } = useStore();
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startStartTime = useRef(0);
@@ -143,15 +159,9 @@ function AudioRegion({ region, trackId }: { region: Region; trackId: string; key
       const x = e.clientX - rect.left;
       const splitTimeOffset = x / PIXELS_PER_SECOND;
       
-      if (splitTimeOffset > 0.1 && splitTimeOffset < region.duration - 0.1) {
-        const track = tracks.find(t => t.id === trackId);
-        if (track) {
-          const region1: Region = { ...region, id: uuidv4(), duration: splitTimeOffset };
-          const region2: Region = { ...region, id: uuidv4(), startTime: region.startTime + splitTimeOffset, duration: region.duration - splitTimeOffset };
-          const newRegions = track.regions.filter(r => r.id !== region.id);
-          updateTrack(trackId, { regions: [...newRegions, region1, region2] });
-          return;
-        }
+      if (splitRegion(trackId, region.id, splitTimeOffset)) {
+        notify('Clip split at the cursor.', 'success');
+        return;
       }
     }
 
@@ -184,13 +194,7 @@ function AudioRegion({ region, trackId }: { region: Region; trackId: string; key
       
       const newStartTime = Math.max(0, snap ? Math.round(nextTime / beatDuration) * beatDuration : nextTime);
       
-      const track = tracks.find(t => t.id === trackId);
-      if (track) {
-        const newRegions = track.regions.map(r => 
-          r.id === region.id ? { ...r, startTime: newStartTime } : r
-        );
-        updateTrack(trackId, { regions: newRegions });
-      }
+      updateRegion(trackId, region.id, { startTime: newStartTime });
     };
 
     const handleMouseUp = () => {
@@ -221,7 +225,7 @@ function AudioRegion({ region, trackId }: { region: Region; trackId: string; key
           />
        </div>
        <div className="absolute top-1 left-2 text-[9px] font-bold text-zinc-500 uppercase tracking-tighter truncate group-hover:text-brand-orange transition-colors">
-         CLIP_{region.id.slice(0,4)}
+         {region.name || `CLIP_${region.id.slice(0,4)}`}
        </div>
 
        {isSelected && (

@@ -55,6 +55,32 @@ export default function PianoRoll() {
     updateTrack(activeTrackId, { regions: newRegions });
   };
 
+  const updateActiveNotes = (nextNotes: Note[]) => {
+    const newRegions = tracks.find(t => t.id === activeTrackId)!.regions.map(r => 
+      r.id === activeRegionId ? { ...r, notes: nextNotes } : r
+    );
+    updateTrack(activeTrackId, { regions: newRegions });
+  };
+
+  const handleQuantize = () => {
+    const grid = 0.25;
+    updateActiveNotes(notes.map(note => ({
+      ...note,
+      startTime: Math.round(note.startTime / grid) * grid,
+      duration: Math.max(grid, Math.round(note.duration / grid) * grid)
+    })));
+    notify('MIDI notes quantized to sixteenth notes.', 'success');
+  };
+
+  const handleHumanize = () => {
+    updateActiveNotes(notes.map(note => ({
+      ...note,
+      startTime: Math.max(0, note.startTime + (Math.random() - 0.5) * 0.06),
+      velocity: Math.min(127, Math.max(40, note.velocity + Math.round((Math.random() - 0.5) * 16)))
+    })));
+    notify('MIDI timing and velocity humanized.', 'success');
+  };
+
   const handleAIChords = async () => {
     try {
       const progression = await aiService.generateChords("C", "Major", "Epic Cinematic");
@@ -113,6 +139,18 @@ export default function PianoRoll() {
           >
             <Wand2 size={12} />
             AI CHORDS
+          </button>
+          <button
+            onClick={handleQuantize}
+            className="px-3 py-1 rounded bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-400 hover:text-white hover:border-zinc-600 transition-all"
+          >
+            QUANTIZE
+          </button>
+          <button
+            onClick={handleHumanize}
+            className="px-3 py-1 rounded bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-400 hover:text-white hover:border-zinc-600 transition-all"
+          >
+            HUMANIZE
           </button>
         </div>
         <button onClick={() => setActiveRegion(null)} className="text-zinc-500 hover:text-white transition-colors">

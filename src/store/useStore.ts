@@ -14,6 +14,7 @@ export interface Region {
   id: string;
   startTime: number; // in seconds (for audio) or beats (for midi triggers)
   duration: number;
+  clipOffset?: number;
   audioUrl?: string;
   buffer?: AudioBuffer;
   notes?: Note[]; // MIDI notes for patterns
@@ -59,6 +60,9 @@ export interface DAWState {
   isRecording: boolean;
   metronomeEnabled: boolean;
   snapEnabled: boolean;
+  loopEnabled: boolean;
+  loopStart: number;
+  loopEnd: number;
   selectedRegionId: string | null;
   isProcessing: boolean; // For AI tasks
   processingMessage: string | null;
@@ -77,6 +81,8 @@ export interface DAWState {
   setRecording: (recording: boolean) => void;
   setMetronome: (enabled: boolean) => void;
   setSnap: (enabled: boolean) => void;
+  setLoopEnabled: (enabled: boolean) => void;
+  setLoopRange: (start: number, end: number) => void;
   setSelectedRegion: (id: string | null) => void;
   setProcessing: (processing: boolean, message?: string | null) => void;
   notify: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -86,6 +92,8 @@ export interface DAWState {
   setBpm: (bpm: number) => void;
   addTrack: (name: string, type?: 'audio' | 'midi') => string;
   deleteRegion: (trackId: string, regionId: string) => void;
+  duplicateRegion: (regionId: string) => string | null;
+  splitRegion: (trackId: string, regionId: string, offsetSeconds: number) => [string, string] | null;
   updateRegion: (trackId: string, regionId: string, updates: Partial<Region>) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   removeTrack: (id: string) => void;
@@ -122,6 +130,9 @@ export const useStore = create<DAWState>()(
       isRecording: false,
       metronomeEnabled: false,
       snapEnabled: true,
+      loopEnabled: false,
+      loopStart: 0,
+      loopEnd: 8,
       isProcessing: false,
       processingMessage: null,
       notice: null,
@@ -134,6 +145,11 @@ export const useStore = create<DAWState>()(
       setRecording: (recording) => set({ isRecording: recording }),
       setMetronome: (enabled) => set({ metronomeEnabled: enabled }),
       setSnap: (enabled) => set({ snapEnabled: enabled }),
+      setLoopEnabled: (enabled) => set({ loopEnabled: enabled }),
+      setLoopRange: (start, end) => set({
+        loopStart: Math.max(0, Math.min(start, end - 0.25)),
+        loopEnd: Math.max(end, start + 0.25)
+      }),
       setSelectedRegion: (id) => set({ selectedRegionId: id }),
       setProcessing: (processing, message = null) => set({ isProcessing: processing, processingMessage: processing ? message : null }),
       notify: (message, type = 'info') => set({ notice: { id: uuidv4(), type, message } }),
@@ -173,6 +189,88 @@ export const useStore = create<DAWState>()(
         selectedRegionId: state.selectedRegionId === regionId ? null : state.selectedRegionId,
         activeRegionId: state.activeRegionId === regionId ? null : state.activeRegionId
       })),
+      duplicateRegion: (regionId) => {
+        const id = uuidv4();
+        let didDuplicate = false;
+        set((state) => {
+          const tracks = state.tracks.map(track => {
+            const region = track.regions.find(r => r.id === regionId);
+            if (!region) return track;
+
+            didDuplicate = true;
+            const beatDuration = 60 / state.bpm;
+            const duplicateStart = region.startTime + (state.snapEnabled ? beatDuration : Math.min(1, region.duration));
+            return {
+              ...track,
+              regions: [
+                ...track.regions,
+                {
+                  ...region,
+                  id,
+                  startTime: duplicateStart,
+                  name: region.name ? `${region.name} copy` : undefined
+                }
+              ]
+            };
+          });
+
+          return didDuplicate ? { tracks, selectedRegionId: id } : {};
+        });
+
+        return didDuplicate ? id : null;
+      },
+      splitRegion: (trackId, regionId, offsetSeconds) => {
+        const firstId = uuidv4();
+        const secondId = uuidv4();
+        let didSplit = false;
+
+        set((state) => ({
+          tracks: state.tracks.map(track => {
+            if (track.id !== trackId) return track;
+
+            const region = track.regions.find(r => r.id === regionId);
+            if (!region || offsetSeconds <= 0.05 || offsetSeconds >= region.duration - 0.05) return track;
+
+            didSplit = true;
+            const secondsPerBeat = 60 / state.bpm;
+            const splitBeat = offsetSeconds / secondsPerBeat;
+            const firstNotes = region.notes?.filter(note => note.startTime < splitBeat);
+            const secondNotes = region.notes
+              ?.filter(note => note.startTime + note.duration > splitBeat)
+              .map(note => ({
+                ...note,
+                id: uuidv4(),
+                startTime: Math.max(0, note.startTime - splitBeat)
+              }));
+
+            const firstRegion: Region = {
+              ...region,
+              id: firstId,
+              duration: offsetSeconds,
+              notes: firstNotes
+            };
+            const secondRegion: Region = {
+              ...region,
+              id: secondId,
+              startTime: region.startTime + offsetSeconds,
+              duration: region.duration - offsetSeconds,
+              clipOffset: (region.clipOffset || 0) + offsetSeconds,
+              notes: secondNotes
+            };
+
+            return {
+              ...track,
+              regions: track.regions
+                .filter(r => r.id !== regionId)
+                .concat(firstRegion, secondRegion)
+            };
+          }),
+          selectedRegionId: secondId,
+          activeRegionId: state.activeRegionId === regionId ? null : state.activeRegionId
+        }));
+
+        return didSplit ? [firstId, secondId] : null;
+      },
       updateRegion: (trackId, regionId, updates) => set((state) => ({
         tracks: state.tracks.map(t => t.id === trackId ? {
           ...t,
@@ -184,7 +282,9 @@ export const useStore = create<DAWState>()(
       })),
       removeTrack: (id) => set((state) => ({
         tracks: state.tracks.filter(t => t.id !== id),
-        selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId
+        selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId,
+        selectedRegionId: state.tracks.find(t => t.id === id)?.regions.some(r => r.id === state.selectedRegionId) ? null : state.selectedRegionId,
+        activeRegionId: state.tracks.find(t => t.id === id)?.regions.some(r => r.id === state.activeRegionId) ? null : state.activeRegionId
       })),
       addRegion: (trackId, region) => {
         const id = uuidv4();
@@ -211,6 +311,7 @@ export const useStore = create<DAWState>()(
         currentTime: 0,
         isPlaying: false,
         isRecording: false,
+        loopEnabled: false,
         selectedTrackId: tracks[0]?.id ?? null,
         selectedRegionId: null,
         activeRegionId: null
@@ -228,7 +329,10 @@ export const useStore = create<DAWState>()(
           regions: t.regions.map(({ buffer, ...r }) => r) // Strip buffers from persistence
         })),
         bpm: state.bpm,
-        duration: state.duration
+        duration: state.duration,
+        loopEnabled: state.loopEnabled,
+        loopStart: state.loopStart,
+        loopEnd: state.loopEnd
       })
     }
   )

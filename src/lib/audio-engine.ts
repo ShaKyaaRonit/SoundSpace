@@ -138,7 +138,7 @@ class AudioEngine {
 
   setupTrack(track: Track) {
     const ctx = this.getContext();
-    const effectIds = JSON.stringify(track.effects?.map(e => ({ id: e.id, enabled: e.enabled })) || []);
+    const effectIds = JSON.stringify(track.effects?.map(e => ({ id: e.id, enabled: e.enabled, params: e.params })) || []);
     
     if (!this.trackNodes.has(track.id) || this.trackNodes.get(track.id)?.lastEffectList !== effectIds) {
       if (this.trackNodes.has(track.id)) {
@@ -161,10 +161,45 @@ class AudioEngine {
         if (!effect.enabled) return;
         let effectNode: AudioNode | null = null;
         switch (effect.type) {
-          case 'reverb': effectNode = ctx.createConvolver(); break;
-          case 'compressor': effectNode = ctx.createDynamicsCompressor(); break;
-          case 'eq': effectNode = ctx.createBiquadFilter(); (effectNode as BiquadFilterNode).type = 'peaking'; break;
-          case 'delay': effectNode = ctx.createDelay(); break;
+          case 'reverb': {
+            const convolver = ctx.createConvolver();
+            convolver.buffer = this.createImpulseResponse(ctx, effect.params?.decay ?? 1.4);
+            effectNode = convolver;
+            break;
+          }
+          case 'compressor': {
+            const compressor = ctx.createDynamicsCompressor();
+            compressor.threshold.value = effect.params?.threshold ?? -18;
+            compressor.ratio.value = effect.params?.ratio ?? 4;
+            compressor.attack.value = effect.params?.attack ?? 0.01;
+            compressor.release.value = effect.params?.release ?? 0.2;
+            effectNode = compressor;
+            break;
+          }
+          case 'limiter': {
+            const limiter = ctx.createDynamicsCompressor();
+            limiter.threshold.value = effect.params?.ceiling ?? -1;
+            limiter.ratio.value = 20;
+            limiter.attack.value = 0.002;
+            limiter.release.value = 0.08;
+            effectNode = limiter;
+            break;
+          }
+          case 'eq': {
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'peaking';
+            filter.frequency.value = effect.params?.freq ?? 1000;
+            filter.gain.value = effect.params?.gain ?? 3;
+            filter.Q.value = effect.params?.q ?? 1;
+            effectNode = filter;
+            break;
+          }
+          case 'delay': {
+            const delay = ctx.createDelay(2);
+            delay.delayTime.value = effect.params?.time ?? 0.18;
+            effectNode = delay;
+            break;
+          }
         }
         if (effectNode) {
           lastNode.connect(effectNode);
@@ -186,6 +221,18 @@ class AudioEngine {
 
   updateTrackParams(track: Track) {
     this.setupTrack(track);
+  }
+
+  private createImpulseResponse(ctx: AudioContext, decay: number) {
+    const length = Math.max(1, Math.floor(ctx.sampleRate * Math.max(0.2, decay)));
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+      }
+    }
+    return impulse;
   }
 
   playMetronomeTick() {
@@ -223,7 +270,7 @@ class AudioEngine {
           const secondsPerBeat = 60 / useStore.getState().bpm;
           region.notes.forEach(note => {
             const noteStartTime = (region.startTime || 0) + note.startTime * secondsPerBeat;
-            if (noteStartTime >= time) {
+            if (noteStartTime >= time && noteStartTime < region.startTime + region.duration) {
               const delay = noteStartTime - time;
               const timerId = window.setTimeout(() => {
                 if (useStore.getState().isPlaying) {
@@ -241,11 +288,16 @@ class AudioEngine {
           source.connect(gain); // Connect to gain instead of panner
 
           // Calculate start offset and delay
-          const offset = Math.max(0, time - region.startTime);
+          const elapsedInsideClip = Math.max(0, time - region.startTime);
+          const offset = (region.clipOffset || 0) + elapsedInsideClip;
           const delay = Math.max(0, region.startTime - time);
+          const playableDuration = Math.min(
+            region.duration - elapsedInsideClip,
+            source.buffer.duration - offset
+          );
           
-          if (time < region.startTime + region.duration) {
-             source.start(ctx.currentTime + delay, offset);
+          if (time < region.startTime + region.duration && playableDuration > 0) {
+             source.start(ctx.currentTime + delay, offset, playableDuration);
              this.activeSources.push(source);
           }
         }
@@ -551,6 +603,11 @@ class AudioEngine {
     }
   }
 
+  async decodeAudioFile(file: File): Promise<AudioBuffer> {
+    const arrayBuffer = await file.arrayBuffer();
+    return this.getContext().decodeAudioData(arrayBuffer.slice(0));
+  }
+
   async exportMixdown(tracks: Track[], bpm: number): Promise<Blob> {
     const duration = Math.max(
       1,
@@ -581,7 +638,11 @@ class AudioEngine {
           const source = offline.createBufferSource();
           source.buffer = region.buffer ?? (await this.loadAudio(region.audioUrl!));
           source.connect(gain);
-          source.start(Math.max(0, region.startTime), 0, Math.min(region.duration, source.buffer.duration));
+          const offset = region.clipOffset || 0;
+          const duration = Math.min(region.duration, source.buffer.duration - offset);
+          if (duration > 0) {
+            source.start(Math.max(0, region.startTime), offset, duration);
+          }
         }
 
         if (track.type === 'midi' && region.notes?.length) {

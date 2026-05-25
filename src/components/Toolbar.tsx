@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Play, Pause, Square, Mic, Save, FolderOpen, CloudUpload, Loader2, Music, Hash, MousePointer2, Scissors as ScissorsIcon } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Play, Pause, Square, Mic, Save, FolderOpen, CloudUpload, Loader2, Music, Hash, MousePointer2, Scissors as ScissorsIcon, Repeat2, Upload } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { audioEngine } from '../lib/audio-engine';
 import { projectService } from '../services/projectService';
@@ -7,24 +7,27 @@ import ProjectBrowser from './ProjectBrowser';
 import { signInWithGoogle, auth } from '../lib/firebase';
 import { LogIn, User } from 'lucide-react';
 import { stopTransport, togglePlayback, toggleRecording } from '../lib/transport';
+import { importAudioFiles } from '../lib/audio-import';
 
 export default function Toolbar() {
   const { 
     isPlaying,
     isRecording,
-    currentTime, setCurrentTime, 
+    currentTime,
     projectName, setProjectName, tracks, 
     bpm,
     metronomeEnabled, setMetronome, 
     snapEnabled, setSnap,
+    loopEnabled, setLoopEnabled, setLoopRange,
     isProcessing,
     activeTool, setTool,
-    projectId, setProjectId,
+    projectId, setProjectId, selectedRegionId,
     notify
   } = useStore();
   const [isSaving, setIsSaving] = useState(false);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [user, setUser] = useState(auth.currentUser);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     return auth.onAuthStateChanged((u) => setUser(u));
@@ -73,7 +76,13 @@ export default function Toolbar() {
     try {
       const id = await projectService.saveProject(projectName, tracks, bpm, projectId);
       setProjectId(id);
-      notify('Project saved successfully.', 'success');
+      const hasSessionOnlyAudio = tracks.some(track => track.regions.some(region => region.buffer && !region.audioUrl));
+      notify(
+        hasSessionOnlyAudio
+          ? 'Project saved. Imported local audio stays available for this session/export but needs cloud storage to reload later.'
+          : 'Project saved successfully.',
+        hasSessionOnlyAudio ? 'info' : 'success'
+      );
     } catch (e) {
       notify('Save failed. Sign in and try again.', 'error');
     } finally {
@@ -97,6 +106,27 @@ export default function Toolbar() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleImportAudio = async (files: FileList | null) => {
+    if (!files?.length) return;
+    await importAudioFiles(Array.from(files));
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleLoopToggle = () => {
+    const selectedRegion = tracks
+      .flatMap(track => track.regions)
+      .find(region => region.id === selectedRegionId);
+
+    if (!loopEnabled && selectedRegion) {
+      setLoopRange(selectedRegion.startTime, selectedRegion.startTime + selectedRegion.duration);
+      setLoopEnabled(true);
+      notify('Loop range set from the selected clip.', 'info');
+      return;
+    }
+
+    setLoopEnabled(!loopEnabled);
   };
 
   const formatTime = (seconds: number) => {
@@ -171,6 +201,13 @@ export default function Toolbar() {
           >
             <Hash size={14} />
           </button>
+          <button 
+            onClick={handleLoopToggle}
+            className={`w-8 h-8 rounded flex items-center justify-center transition-all ${loopEnabled ? 'text-brand-orange bg-brand-orange/10' : 'text-zinc-600 hover:text-zinc-400'}`}
+            title="Loop selected clip or current range (L)"
+          >
+            <Repeat2 size={14} />
+          </button>
         </div>
 
         {isProcessing && (
@@ -217,6 +254,21 @@ export default function Toolbar() {
       </div>
 
       <div className="flex items-center gap-3">
+        <button 
+          onClick={() => fileInputRef.current?.click()}
+          className="w-10 h-10 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-brand-orange hover:border-brand-orange/50 transition-all"
+          title="Import Audio"
+        >
+          <Upload size={18} />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm"
+          multiple
+          className="hidden"
+          onChange={(e) => handleImportAudio(e.target.files)}
+        />
         <button 
           onClick={() => setIsBrowserOpen(true)}
           className="w-10 h-10 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-brand-orange hover:border-brand-orange/50 transition-all group"
