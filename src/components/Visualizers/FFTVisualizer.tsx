@@ -3,7 +3,7 @@ import { audioEngine } from '../../lib/audio-engine';
 
 export default function FFTVisualizer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;

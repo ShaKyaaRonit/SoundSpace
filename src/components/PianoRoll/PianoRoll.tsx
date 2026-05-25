@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { X, Wand2, Music, Pencil, Trash2 } from 'lucide-react';
-import { useStore, Note } from '../../store/useStore';
+import { useStore, Note, Region } from '../../store/useStore';
 import { audioEngine } from '../../lib/audio-engine';
 import { aiService } from '../../services/aiService';
 
@@ -9,25 +9,18 @@ const BEAT_WIDTH = 80;
 const TOTAL_NOTES = 60; // 5 octaves
 
 export default function PianoRoll() {
-  const { activeRegionId, tracks, updateTrack, setActiveRegion, bpm } = useStore();
+  const { activeRegionId, tracks, updateTrack, setActiveRegion } = useStore();
   const [tool, setTool] = useState<'pencil' | 'trash'>('pencil');
   
   if (!activeRegionId) return null;
 
-  // Find the track and region
-  let activeTrackId = "";
-  let activeRegion: any = null;
-  tracks.forEach(t => {
-    const r = t.regions.find(reg => reg.id === activeRegionId);
-    if (r) {
-      activeTrackId = t.id;
-      activeRegion = r;
-    }
-  });
+  const activeTrack = tracks.find(t => t.regions.some(reg => reg.id === activeRegionId));
+  const activeRegion: Region | undefined = activeTrack?.regions.find(reg => reg.id === activeRegionId);
 
-  if (!activeRegion) return null;
+  if (!activeTrack || !activeRegion) return null;
 
-  const notes = activeRegion.notes || [];
+  const activeTrackId = activeTrack.id;
+  const notes: Note[] = activeRegion.notes || [];
 
   const handleAddNote = (e: React.MouseEvent) => {
     if (tool !== 'pencil') return;

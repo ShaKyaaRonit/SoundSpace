@@ -1,6 +1,35 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let ai: GoogleGenAI | null = null;
+
+function getAI() {
+  const apiKey = __GEMINI_API_KEY__;
+
+  if (!apiKey) {
+    throw new Error("Missing VITE_GEMINI_API_KEY. Add it to .env and restart the dev server to use AI features.");
+  }
+
+  ai ??= new GoogleGenAI({ apiKey });
+  return ai;
+}
+
+function getResponseText(response: { text?: string }): string {
+  if (!response.text) {
+    throw new Error("The AI service returned an empty response.");
+  }
+
+  return response.text;
+}
+
+function parseJsonResponse<T>(response: { text?: string }): T {
+  const text = getResponseText(response);
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error("The AI service returned invalid JSON.");
+  }
+}
 
 export interface ChordProgression {
   key: string;
@@ -18,7 +47,7 @@ export const aiService = {
    * Generates a chord progression based on a key and mood.
    */
   async generateChords(key: string, scale: string, mood: string): Promise<ChordProgression> {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Generate a 4-bar chord progression in the key of ${key} ${scale}. Mood: ${mood}.
                  Return as a JSON object with the specified structure.`,
@@ -51,27 +80,27 @@ export const aiService = {
       }
     });
 
-    return JSON.parse(response.text);
+    return parseJsonResponse<ChordProgression>(response);
   },
 
   /**
    * Generates a music description for Lyria/MusicGen and returns instructions.
    */
   async generateSongPrompt(style: string, tempo: number, instrumentation: string): Promise<string> {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Create a detailed descriptive prompt for a high-fidelity music generation model.
                  Style: ${style}, BPM: ${tempo}, Instruments: ${instrumentation}.
                  The prompt should describe rhythm, texture, and emotional quality.`
     });
-    return response.text;
+    return getResponseText(response);
   },
 
   /**
    * Analyzes audio features and suggests mastering settings.
    */
   async getMasteringSuggestions(peak: number, rms: number, style: string) {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Audio Analysis: Peak: ${peak}dB, RMS: ${rms}dB. Style: ${style}.
                  Suggest mastering offsets for a Limiter (ceiling), Compressor (ratio/threshold), and EQ (high/low shelves).
@@ -90,14 +119,20 @@ export const aiService = {
         }
       }
     });
-    return JSON.parse(response.text);
+    return parseJsonResponse<{
+      limiterCeiling: number;
+      compressorThreshold: number;
+      compressorRatio: number;
+      eqLowGain: number;
+      eqHighGain: number;
+    }>(response);
   },
 
   /**
    * Suggests volume and panning based on track characteristics.
    */
   async getTrackBalanceSuggestions(trackName: string, trackType: string) {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Track Name: ${trackName}, Type: ${trackType}. 
                  Suggest professional volume (0.0 to 1.0) and panning (-1.0 to 1.0) for this track in a modern mix.
@@ -113,6 +148,9 @@ export const aiService = {
         }
       }
     });
-    return JSON.parse(response.text);
+    return parseJsonResponse<{
+      volume: number;
+      pan: number;
+    }>(response);
   }
 };

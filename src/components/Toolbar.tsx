@@ -33,7 +33,11 @@ export default function Toolbar() {
     if (user) {
       if (confirm("Sign out?")) await auth.signOut();
     } else {
-      await signInWithGoogle();
+      try {
+        await signInWithGoogle();
+      } catch {
+        alert("Sign-in failed. Please try again.");
+      }
     }
   };
 
