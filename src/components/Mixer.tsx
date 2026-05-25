@@ -8,7 +8,7 @@ import FFTVisualizer from './Visualizers/FFTVisualizer';
 import PluginRack from './PluginRack';
 
 export default function Mixer() {
-  const { tracks, updateTrack, selectedTrackId } = useStore();
+  const { tracks, updateTrack, selectedTrackId, notify } = useStore();
 
   const handleAIMastering = async () => {
     try {
@@ -22,9 +22,9 @@ export default function Mixer() {
         compThreshold: suggestion.compressorThreshold,
         limiterCeiling: suggestion.limiterCeiling
       });
-      alert(`AI Mastered: Boosted Lows by ${suggestion.eqLowGain}dB, Highs by ${suggestion.eqHighGain}dB`);
+      notify(`AI mastering applied: lows ${suggestion.eqLowGain}dB, highs ${suggestion.eqHighGain}dB.`, 'success');
     } catch (e) {
-      console.error(e);
+      notify('AI mastering failed. Check the Gemini key and try again.', 'error');
     }
   };
 

@@ -1,14 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { Play, Pause, Square, Mic, Plus, Settings, Save, ListMusic } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { useStore } from './store/useStore';
 import { audioEngine } from './lib/audio-engine';
-import { motion, AnimatePresence } from 'motion/react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { stopTransport, togglePlayback, toggleRecording } from './lib/transport';
 
 // Components
 import Toolbar from './components/Toolbar';
@@ -19,14 +13,14 @@ import Sidebar from './components/Sidebar';
 import PianoRoll from './components/PianoRoll/PianoRoll';
 
 export default function App() {
-  const { isPlaying, currentTime, setCurrentTime, setPlaying, metronomeEnabled, bpm, setMetronome, snapEnabled, setSnap, isRecording, setRecording, selectedRegionId, deleteRegion, selectedTrackId, activeTool, setTool } = useStore();
-  const requestRef = useRef<number>(null);
+  const { isPlaying, setCurrentTime, metronomeEnabled, bpm, setMetronome, snapEnabled, setSnap, selectedRegionId, deleteRegion, selectedTrackId, activeTool, setTool, addTrack, notify } = useStore();
+  const requestRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const lastBeatRef = useRef<number>(-1);
 
   // Keyboard Shortcuts
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
       // Don't trigger if typing in an input
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
 
@@ -39,10 +33,18 @@ export default function App() {
           break;
         case 'Space':
           e.preventDefault();
-          setPlaying(!isPlaying);
+          try {
+            await togglePlayback();
+          } catch {
+            notify('Playback could not start. Try again after the audio engine is ready.', 'error');
+          }
           break;
         case 'KeyR':
-          setRecording(!isRecording);
+          try {
+            await toggleRecording();
+          } catch {
+            notify('Recording could not start. Check microphone permission and try again.', 'error');
+          }
           break;
         case 'KeyM':
           setMetronome(!metronomeEnabled);
@@ -57,28 +59,28 @@ export default function App() {
           }
           break;
         case 'Enter':
-          setPlaying(false);
-          setCurrentTime(0);
+          await stopTransport();
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, isRecording, metronomeEnabled, snapEnabled, selectedRegionId, selectedTrackId]);
+  }, [metronomeEnabled, snapEnabled, selectedRegionId, selectedTrackId, notify]);
 
   // Synchronization loop using requestAnimationFrame
   const animate = (time: number) => {
-    if (isPlaying) {
+    const state = useStore.getState();
+    if (state.isPlaying) {
       if (lastTimeRef.current > 0) {
         const deltaTime = (time - lastTimeRef.current) / 1000;
-        const nextTime = currentTime + deltaTime;
+        const nextTime = state.currentTime + deltaTime;
         setCurrentTime(nextTime);
 
-        if (metronomeEnabled) {
-          const currentBeat = Math.floor(nextTime * (bpm / 60));
+        if (state.metronomeEnabled) {
+          const currentBeat = Math.floor(nextTime * (state.bpm / 60));
           if (currentBeat > lastBeatRef.current) {
-            audioEngine.playNote(currentBeat % 4 === 0 ? 84 : 72, 0.05, "master");
+            audioEngine.playMetronomeTick();
             lastBeatRef.current = currentBeat;
           }
         }
@@ -96,7 +98,7 @@ export default function App() {
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
-  }, [isPlaying, metronomeEnabled, bpm]); // Removed currentTime from dependencies
+  }, [isPlaying, setCurrentTime]);
 
   // Real-time audio node updates
   const tracks = useStore(state => state.tracks);
@@ -114,7 +116,11 @@ export default function App() {
         <div className="w-64 border-r border-border-dim flex flex-col bg-bg-sidebar">
           <div className="p-4 border-b border-border-dim flex justify-between items-center bg-bg-accent/30">
             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Track List</span>
-            <button className="p-1 hover:bg-bg-accent rounded transition-colors text-zinc-600 hover:text-zinc-100">
+            <button
+              onClick={() => addTrack(`Audio ${useStore.getState().tracks.length + 1}`, 'audio')}
+              className="p-1 hover:bg-bg-accent rounded transition-colors text-zinc-600 hover:text-zinc-100"
+              title="Add audio track"
+            >
               <Plus size={14} />
             </button>
           </div>
@@ -135,6 +141,35 @@ export default function App() {
       {/* Bottom Mixer Console */}
       <Mixer />
       <PianoRoll />
+      <NoticeToast />
+    </div>
+  );
+}
+
+function NoticeToast() {
+  const notice = useStore(state => state.notice);
+  const clearNotice = useStore(state => state.clearNotice);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(clearNotice, 4200);
+    return () => window.clearTimeout(timeout);
+  }, [notice, clearNotice]);
+
+  if (!notice) return null;
+
+  const tone = notice.type === 'error'
+    ? 'border-red-500/40 bg-red-500/10 text-red-100'
+    : notice.type === 'success'
+      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+      : 'border-brand-orange/40 bg-brand-orange/10 text-orange-100';
+
+  return (
+    <div className={`fixed right-4 top-20 z-[120] flex max-w-sm items-start gap-3 rounded border px-4 py-3 shadow-2xl backdrop-blur ${tone}`}>
+      <p className="text-sm leading-relaxed">{notice.message}</p>
+      <button onClick={clearNotice} className="mt-0.5 text-current opacity-70 hover:opacity-100" title="Dismiss">
+        <X size={14} />
+      </button>
     </div>
   );
 }

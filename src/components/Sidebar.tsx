@@ -12,7 +12,7 @@ const SAMPLE_LOOPS = [
 ];
 
 export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) {
-  const { addTrack, addRegion, tracks, currentTime, setProcessing } = useStore();
+  const { addTrack, addRegion, tracks, currentTime, setProcessing, notify } = useStore();
   const [activeTab, setActiveTab] = useState<'loops' | 'ai' | 'instruments' | 'rack'>('instruments');
   const [isGenerating, setIsGenerating] = useState(false);
   const [vstSearch, setVstSearch] = useState('');
@@ -44,7 +44,7 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
       addTrack('New Track', 'audio');
     }
     
-    setProcessing(true);
+    setProcessing(true, 'Loading sample...');
     try {
       // 2. Load the buffer
       const buffer = await audioEngine.loadAudio(sample.url);
@@ -60,27 +60,24 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
         buffer
       });
     } catch (e) {
-      console.error("Failed to load sample:", e);
+      notify('Sample could not be loaded.', 'error');
     } finally {
       setProcessing(false);
     }
   };
 
   const handleAddMidiTrack = () => {
-    addTrack(`Midi ${tracks.length + 1}`, 'midi');
-    setTimeout(() => {
-      const state = useStore.getState();
-      const newTrack = state.tracks[state.tracks.length - 1];
-      addRegion(newTrack.id, {
-        startTime: 0,
-        duration: 8,
-        notes: []
-      });
-    }, 50);
+    const trackId = addTrack(`Midi ${tracks.length + 1}`, 'midi');
+    addRegion(trackId, {
+      startTime: 0,
+      duration: 8,
+      notes: [],
+      name: 'MIDI Clip'
+    });
+    notify('MIDI track added. Double-click the clip to edit notes.', 'success');
   };
 
   const handleLoadInstrument = (type: string, name: string) => {
-    const id = uuidv4();
     const defaultSettings: any = {
       'synth-mono': { cutoff: 1500, resonance: 2, attack: 0.05, release: 0.3 },
       'synth-pad': { attack: 0.8, release: 1.5 },
@@ -88,39 +85,34 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
       'drums': {}
     };
 
-    addTrack(name, 'midi');
-    
-    // Wait for store to update
-    setTimeout(() => {
-      const state = useStore.getState();
-      const newTrack = state.tracks[state.tracks.length - 1];
-      
-      useStore.getState().updateTrack(newTrack.id, {
-        instrument: {
-          id: uuidv4(),
-          name: name,
-          type: type as any,
-          settings: defaultSettings[type] || {}
-        }
-      });
+    const trackId = addTrack(name, 'midi');
+    useStore.getState().updateTrack(trackId, {
+      instrument: {
+        id: uuidv4(),
+        name,
+        type: type as any,
+        settings: defaultSettings[type] || {}
+      }
+    });
 
-      addRegion(newTrack.id, {
-        startTime: 0,
-        duration: 8,
-        notes: [
-          { id: uuidv4(), midi: 60, startTime: 0, duration: 1, velocity: 100 },
-          { id: uuidv4(), midi: 64, startTime: 2, duration: 1, velocity: 100 },
-          { id: uuidv4(), midi: 67, startTime: 4, duration: 1, velocity: 100 }
-        ]
-      });
-    }, 100);
+    addRegion(trackId, {
+      startTime: 0,
+      duration: 8,
+      name: 'Starter Pattern',
+      notes: [
+        { id: uuidv4(), midi: 60, startTime: 0, duration: 1, velocity: 100 },
+        { id: uuidv4(), midi: 64, startTime: 2, duration: 1, velocity: 100 },
+        { id: uuidv4(), midi: 67, startTime: 4, duration: 1, velocity: 100 }
+      ]
+    });
+    notify(`${name} loaded with a starter MIDI clip.`, 'success');
   };
 
   const handleGenerateSong = async () => {
     setIsGenerating(true);
-    setProcessing(true);
+    setProcessing(true, 'Generating starter stems...');
     try {
-      const prompt = await aiService.generateSongPrompt("Cyberpunk lo-fi", 90, "Smooth synths, glitchy drums");
+      await aiService.generateSongPrompt("Cyberpunk lo-fi", 90, "Smooth synths, glitchy drums");
       
       // Professional Stems with actual logic
       const stems = [
@@ -131,25 +123,24 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
       ];
 
       for (const stem of stems) {
-        addTrack(stem.name, 'audio');
-        
-        // Wait for store to update and get the track
-        await new Promise(r => setTimeout(r, 150));
-        const state = useStore.getState();
-        const targetTrack = state.tracks[state.tracks.length - 1];
+        const targetTrackId = addTrack(stem.name, 'audio');
         
         try {
           const buffer = await audioEngine.loadAudio(stem.url);
-          addRegion(targetTrack.id, {
+          addRegion(targetTrackId, {
             startTime: 0,
             duration: buffer.duration,
             audioUrl: stem.url,
-            buffer
+            buffer,
+            name: stem.name
           });
         } catch (err) {
-          console.warn(`Failed to generate stem ${stem.name}`, err);
+          notify(`Could not load ${stem.name}.`, 'error');
         }
       }
+      notify('Starter stems added to the timeline.', 'success');
+    } catch {
+      notify('AI stem generation failed. Check the Gemini key and try again.', 'error');
     } finally {
       setIsGenerating(false);
       setProcessing(false);
@@ -368,31 +359,31 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
 
               <button 
                 onClick={async () => {
-                   setProcessing(true);
+                   setProcessing(true, 'Creating isolated stems...');
                    setIsGenerating(true);
                    try {
                      const stemNames = ['Vocals', 'Drums', 'Bass', 'Vines & Pianos'];
                      const url = 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.mp3';
                      
                      for (const name of stemNames) {
-                        addTrack(name + " (AI Isolated)", 'audio');
-                        await new Promise(r => setTimeout(r, 200));
-                        
-                        const state = useStore.getState();
-                        const targetTrack = state.tracks[state.tracks.length - 1];
+                        const targetTrackId = addTrack(name + " (AI Isolated)", 'audio');
                         
                         try {
                           const buffer = await audioEngine.loadAudio(url);
-                          addRegion(targetTrack.id, {
+                          addRegion(targetTrackId, {
                             startTime: 0,
                             duration: buffer.duration,
                             audioUrl: url,
-                            buffer
+                            buffer,
+                            name
                           });
                         } catch (err) {
-                           console.error(err);
+                           notify(`Could not isolate ${name}.`, 'error');
                         }
                      }
+                     notify('Isolation stems added.', 'success');
+                   } catch {
+                     notify('Source isolation failed.', 'error');
                    } finally {
                      setIsGenerating(false);
                      setProcessing(false);
@@ -411,7 +402,7 @@ export default function Sidebar({ export_hidden }: { export_hidden?: boolean }) 
               </button>
 
               <button 
-                onClick={() => alert("Deep Mastering AI will analyze your export and optimize loudness.")}
+                onClick={() => notify('Use AI Master in the mixer to analyze the current mix and apply mastering settings.', 'info')}
                 className="w-full h-14 bg-[#0a0a0a] border border-zinc-800 rounded-lg flex items-center px-4 gap-3 group hover:border-indigo-500/50 transition-all active:scale-[0.98]"
               >
                 <div className="w-8 h-8 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500">

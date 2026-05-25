@@ -5,6 +5,9 @@ import { useStore } from '../store/useStore';
 import { projectService } from '../services/projectService';
 import { auth } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { audioEngine } from '../lib/audio-engine';
+import { stopTransport } from '../lib/transport';
+import { Track } from '../store/useStore';
 
 interface ProjectBrowserProps {
   isOpen: boolean;
@@ -12,7 +15,7 @@ interface ProjectBrowserProps {
 }
 
 export default function ProjectBrowser({ isOpen, onClose }: ProjectBrowserProps) {
-  const { setProject, setProjectId, bpm, tracks, projectName } = useStore();
+  const { setProject, setProjectId, setProcessing, notify } = useStore();
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
@@ -31,17 +34,27 @@ export default function ProjectBrowser({ isOpen, onClose }: ProjectBrowserProps)
       const projs = await projectService.getProjects();
       setProjects(projs);
     } catch (e) {
-      console.error(e);
+      notify('Could not load your project list.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleLoad = async (proj: any) => {
-    setProject(proj.name, proj.tracks);
-    setProjectId(proj.id);
-    useStore.getState().setBpm(proj.bpm || 120);
-    onClose();
+    setProcessing(true, 'Loading project audio...');
+    try {
+      await stopTransport();
+      const hydratedTracks = await hydrateProjectTracks(proj.tracks || []);
+      setProject(proj.name, hydratedTracks);
+      setProjectId(proj.id);
+      useStore.getState().setBpm(proj.bpm || 120);
+      notify(`Loaded "${proj.name}".`, 'success');
+      onClose();
+    } catch {
+      notify('Project could not be loaded.', 'error');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
@@ -54,8 +67,9 @@ export default function ProjectBrowser({ isOpen, onClose }: ProjectBrowserProps)
       if (useStore.getState().projectId === id) {
         setProjectId(null);
       }
+      notify('Project deleted.', 'success');
     } catch (e) {
-      alert("Delete failed");
+      notify('Delete failed. Try again.', 'error');
     }
   };
 
@@ -76,6 +90,7 @@ export default function ProjectBrowser({ isOpen, onClose }: ProjectBrowserProps)
       ]);
       setProjectId(null);
       useStore.getState().setBpm(120);
+      notify('Started a new project.', 'info');
       onClose();
     }
   };
@@ -182,4 +197,19 @@ export default function ProjectBrowser({ isOpen, onClose }: ProjectBrowserProps)
       )}
     </AnimatePresence>
   );
+}
+
+async function hydrateProjectTracks(tracks: Track[]): Promise<Track[]> {
+  return Promise.all(tracks.map(async (track) => ({
+    ...track,
+    instrument: track.instrument || undefined,
+    regions: await Promise.all((track.regions || []).map(async (region) => {
+      if (!region.buffer && region.audioUrl) {
+        const buffer = await audioEngine.loadAudio(region.audioUrl);
+        return { ...region, buffer };
+      }
+
+      return region;
+    }))
+  })));
 }

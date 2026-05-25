@@ -34,15 +34,20 @@ function TrackHeaderItem({ track, index, isActive, onUpdate, onSelect }: {
   key?: string;
 }) {
   const [isBalancing, setIsBalancing] = useState(false);
+  const notify = useStore(state => state.notify);
 
   const handleAiBalance = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsBalancing(true);
     try {
       const suggestion = await aiService.getTrackBalanceSuggestions(track.name, track.type);
-      onUpdate({ volume: suggestion.volume, pan: suggestion.pan });
+      onUpdate({
+        volume: Math.max(0, Math.min(1.5, suggestion.volume)),
+        pan: Math.max(-1, Math.min(1, suggestion.pan))
+      });
+      notify(`Balanced ${track.name}.`, 'success');
     } catch (e) {
-      console.error(e);
+      notify('AI balance failed. Check the Gemini key and try again.', 'error');
     } finally {
       setIsBalancing(false);
     }
@@ -75,13 +80,13 @@ function TrackHeaderItem({ track, index, isActive, onUpdate, onSelect }: {
       <div className="flex-1 flex flex-col justify-end gap-2">
         <div className="flex items-center gap-1.5">
           <button 
-            onClick={() => onUpdate({ muted: !track.muted })}
+            onClick={(e) => { e.stopPropagation(); onUpdate({ muted: !track.muted }); }}
             className={`w-7 h-5 text-[9px] font-black rounded flex items-center justify-center transition-all border ${track.muted ? 'bg-zinc-950 border-orange-500/50 text-orange-500' : 'bg-zinc-900 border-zinc-800 text-zinc-600 hover:border-zinc-700'}`}
           >
             M
           </button>
           <button 
-            onClick={() => onUpdate({ soloed: !track.soloed })}
+            onClick={(e) => { e.stopPropagation(); onUpdate({ soloed: !track.soloed }); }}
             className={`w-7 h-5 text-[9px] font-black rounded flex items-center justify-center transition-all border ${track.soloed ? 'bg-zinc-950 border-yellow-500/50 text-yellow-500' : 'bg-zinc-900 border-zinc-800 text-zinc-600 hover:border-zinc-700'}`}
           >
             S

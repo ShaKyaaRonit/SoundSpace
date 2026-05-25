@@ -27,6 +27,7 @@ class AudioEngine {
   public lastPeak: number = -Infinity;
   public lastRMS: number = -Infinity;
   private metronomeTimers: number[] = [];
+  private midiTimers: number[] = [];
 
   constructor() {
     // Context will be lazily initialized in getContext()
@@ -50,18 +51,6 @@ class AudioEngine {
     
     this.masterAnalyzer = ctx.createAnalyser();
     this.masterAnalyzer.fftSize = 2048;
-
-    // Load Worklet
-    try {
-      await ctx.audioWorklet.addModule('/worklets/mastering-processor.js');
-      this.masteringWorklet = new AudioWorkletNode(ctx, 'mastering-processor');
-      this.masteringWorklet.port.onmessage = (e) => {
-        this.lastPeak = e.data.peak;
-        this.lastRMS = e.data.rms;
-      };
-    } catch (e) {
-      console.error("Failed to load mastering worklet", e);
-    }
 
     // Initialize Mastering Chain
     this.masteringChain = {
@@ -98,13 +87,24 @@ class AudioEngine {
     lastNode.connect(this.masteringChain.limiter);
     lastNode = this.masteringChain.limiter;
 
-    if (this.masteringWorklet) {
-      lastNode.connect(this.masteringWorklet);
-      lastNode = this.masteringWorklet;
-    }
-
     lastNode.connect(this.masterAnalyzer);
     this.masterAnalyzer.connect(ctx.destination);
+
+    // The worklet is optional meter analysis. Keep the signal path working if it
+    // loads slowly or is unavailable on a given host.
+    try {
+      await ctx.audioWorklet.addModule('/worklets/mastering-processor.js');
+      this.masteringWorklet = new AudioWorkletNode(ctx, 'mastering-processor');
+      this.masteringWorklet.port.onmessage = (e) => {
+        this.lastPeak = e.data.peak;
+        this.lastRMS = e.data.rms;
+      };
+      this.masteringChain.limiter.disconnect(this.masterAnalyzer);
+      this.masteringChain.limiter.connect(this.masteringWorklet);
+      this.masteringWorklet.connect(this.masterAnalyzer);
+    } catch (e) {
+      console.error("Failed to load mastering worklet", e);
+    }
   }
 
   getAnalyzerData(): Uint8Array {
@@ -208,19 +208,6 @@ class AudioEngine {
 
     this.startTime = ctx.currentTime - time;
 
-    if (useStore.getState().metronomeEnabled) {
-      const bpm = useStore.getState().bpm;
-      const beatDuration = 60 / bpm;
-      for (let i = 0; i < 64; i++) {
-        const beatTime = i * beatDuration;
-        if (beatTime >= time) {
-          const delay = beatTime - time;
-          const tId = window.setTimeout(() => this.playMetronomeTick(), delay * 1000);
-          this.metronomeTimers.push(tId);
-        }
-      }
-    }
-
     // Solo logic: If any track is soloed, only those play. Otherwise all play.
     const hasSolo = tracks.some(t => t.soloed);
     const playableTracks = hasSolo ? tracks.filter(t => t.soloed) : tracks;
@@ -238,11 +225,12 @@ class AudioEngine {
             const noteStartTime = (region.startTime || 0) + note.startTime * secondsPerBeat;
             if (noteStartTime >= time) {
               const delay = noteStartTime - time;
-              setTimeout(() => {
+              const timerId = window.setTimeout(() => {
                 if (useStore.getState().isPlaying) {
                   this.playNote(note.midi, note.duration * secondsPerBeat, track.id);
                 }
               }, delay * 1000);
+              this.midiTimers.push(timerId);
             }
           });
         }
@@ -275,9 +263,15 @@ class AudioEngine {
     this.activeSources = [];
     this.metronomeTimers.forEach(t => clearTimeout(t));
     this.metronomeTimers = [];
+    this.midiTimers.forEach(t => clearTimeout(t));
+    this.midiTimers = [];
   }
 
   async startRecording() {
+    if (this.mediaRecorder?.state === 'recording') {
+      return;
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.mediaRecorder = new MediaRecorder(stream);
     this.audioChunks = [];
@@ -290,14 +284,23 @@ class AudioEngine {
   }
 
   async stopRecording(): Promise<{ blob: Blob; buffer: AudioBuffer }> {
-    return new Promise((resolve) => {
-      if (!this.mediaRecorder) return;
+    return new Promise((resolve, reject) => {
+      if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
+        reject(new Error("No active recording to stop."));
+        return;
+      }
       
       this.mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(this.audioChunks, { type: 'audio/wav' });
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        const audioBuffer = await this.getContext().decodeAudioData(arrayBuffer);
-        resolve({ blob: audioBlob, buffer: audioBuffer });
+        try {
+          const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
+          const arrayBuffer = await audioBlob.arrayBuffer();
+          const audioBuffer = await this.getContext().decodeAudioData(arrayBuffer);
+          this.mediaRecorder = null;
+          this.audioChunks = [];
+          resolve({ blob: audioBlob, buffer: audioBuffer });
+        } catch (error) {
+          reject(error);
+        }
       };
 
       this.mediaRecorder.stop();
@@ -546,6 +549,140 @@ class AudioEngine {
       const ctx = this.getContext();
       return ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
     }
+  }
+
+  async exportMixdown(tracks: Track[], bpm: number): Promise<Blob> {
+    const duration = Math.max(
+      1,
+      ...tracks.flatMap(track => track.regions.map(region => region.startTime + region.duration))
+    );
+    const sampleRate = this.getContext().sampleRate || 44100;
+    const offline = new OfflineAudioContext(2, Math.ceil((duration + 1) * sampleRate), sampleRate);
+    const hasSolo = tracks.some(track => track.soloed);
+    const playableTracks = hasSolo ? tracks.filter(track => track.soloed) : tracks;
+
+    for (const track of playableTracks) {
+      if (track.muted && !track.soloed) continue;
+
+      const gain = offline.createGain();
+      gain.gain.value = track.volume;
+
+      let destination: AudioNode = gain;
+      if (typeof offline.createStereoPanner === 'function') {
+        const panner = offline.createStereoPanner();
+        panner.pan.value = track.pan;
+        gain.connect(panner);
+        destination = panner;
+      }
+      destination.connect(offline.destination);
+
+      for (const region of track.regions) {
+        if (track.type === 'audio' && (region.buffer || region.audioUrl)) {
+          const source = offline.createBufferSource();
+          source.buffer = region.buffer ?? (await this.loadAudio(region.audioUrl!));
+          source.connect(gain);
+          source.start(Math.max(0, region.startTime), 0, Math.min(region.duration, source.buffer.duration));
+        }
+
+        if (track.type === 'midi' && region.notes?.length) {
+          const secondsPerBeat = 60 / bpm;
+          for (const note of region.notes) {
+            this.scheduleOfflineNote(
+              offline,
+              gain,
+              note.midi,
+              region.startTime + note.startTime * secondsPerBeat,
+              note.duration * secondsPerBeat,
+              track.instrument?.type || 'synth-mono'
+            );
+          }
+        }
+      }
+    }
+
+    const rendered = await offline.startRendering();
+    return this.encodeWav(rendered);
+  }
+
+  private scheduleOfflineNote(
+    ctx: OfflineAudioContext,
+    destination: AudioNode,
+    midi: number,
+    startTime: number,
+    duration: number,
+    type: NonNullable<Track['instrument']>['type']
+  ) {
+    if (type === 'drums') {
+      const noise = ctx.createBufferSource();
+      const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * 0.08));
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.25, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.12);
+      noise.buffer = buffer;
+      noise.connect(gain);
+      gain.connect(destination);
+      noise.start(startTime);
+      noise.stop(startTime + 0.12);
+      return;
+    }
+
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type === 'synth-pad' ? 'sawtooth' : type === 'synth-lead' ? 'square' : 'triangle';
+    osc.frequency.setValueAtTime(freq, startTime);
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(0.18, startTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + Math.max(0.05, duration));
+    osc.connect(gain);
+    gain.connect(destination);
+    osc.start(startTime);
+    osc.stop(startTime + Math.max(0.05, duration));
+  }
+
+  private encodeWav(buffer: AudioBuffer): Blob {
+    const length = buffer.length;
+    const channelCount = buffer.numberOfChannels;
+    const bytesPerSample = 2;
+    const blockAlign = channelCount * bytesPerSample;
+    const dataSize = length * blockAlign;
+    const arrayBuffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(arrayBuffer);
+
+    const writeString = (offset: number, value: string) => {
+      for (let i = 0; i < value.length; i++) {
+        view.setUint8(offset + i, value.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channelCount, true);
+    view.setUint32(24, buffer.sampleRate, true);
+    view.setUint32(28, buffer.sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bytesPerSample * 8, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    const channels = Array.from({ length: channelCount }, (_, index) => buffer.getChannelData(index));
+    for (let i = 0; i < length; i++) {
+      for (let channel = 0; channel < channelCount; channel++) {
+        const sample = Math.max(-1, Math.min(1, channels[channel][i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += bytesPerSample;
+      }
+    }
+
+    return new Blob([arrayBuffer], { type: 'audio/wav' });
   }
 }
 

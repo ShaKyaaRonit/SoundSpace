@@ -9,7 +9,7 @@ const BEAT_WIDTH = 80;
 const TOTAL_NOTES = 60; // 5 octaves
 
 export default function PianoRoll() {
-  const { activeRegionId, tracks, updateTrack, setActiveRegion } = useStore();
+  const { activeRegionId, tracks, updateTrack, setActiveRegion, notify } = useStore();
   const [tool, setTool] = useState<'pencil' | 'trash'>('pencil');
   
   if (!activeRegionId) return null;
@@ -78,8 +78,9 @@ export default function PianoRoll() {
         r.id === activeRegionId ? { ...r, notes: newNotes } : r
       );
       updateTrack(activeTrackId, { regions: newRegions });
+      notify('AI chords added to the MIDI clip.', 'success');
     } catch (e) {
-      console.error(e);
+      notify('AI chords failed. Check the Gemini key and try again.', 'error');
     }
   };
 

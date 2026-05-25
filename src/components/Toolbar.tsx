@@ -1,25 +1,26 @@
 import React, { useState } from 'react';
-import { Play, Pause, Square, Mic, Save, FolderOpen, Settings, Volume2, CloudUpload, Loader2, Music, Hash, Wand2, MousePointer2, Scissors as ScissorsIcon } from 'lucide-react';
+import { Play, Pause, Square, Mic, Save, FolderOpen, CloudUpload, Loader2, Music, Hash, MousePointer2, Scissors as ScissorsIcon } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { audioEngine } from '../lib/audio-engine';
 import { projectService } from '../services/projectService';
 import ProjectBrowser from './ProjectBrowser';
 import { signInWithGoogle, auth } from '../lib/firebase';
 import { LogIn, User } from 'lucide-react';
+import { stopTransport, togglePlayback, toggleRecording } from '../lib/transport';
 
 export default function Toolbar() {
   const { 
-    isPlaying, setPlaying, 
-    isRecording, setRecording, 
+    isPlaying,
+    isRecording,
     currentTime, setCurrentTime, 
     projectName, setProjectName, tracks, 
     bpm,
-    addTrack, addRegion, 
     metronomeEnabled, setMetronome, 
     snapEnabled, setSnap,
     isProcessing,
     activeTool, setTool,
-    projectId, setProjectId
+    projectId, setProjectId,
+    notify
   } = useStore();
   const [isSaving, setIsSaving] = useState(false);
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -35,57 +36,35 @@ export default function Toolbar() {
     } else {
       try {
         await signInWithGoogle();
+        notify('Signed in successfully.', 'success');
       } catch {
-        alert("Sign-in failed. Please try again.");
+        notify('Sign-in failed. Please try again.', 'error');
       }
     }
   };
 
   const handlePlayPause = async () => {
-    if (isPlaying || isRecording) {
-      if (isRecording) await handleToggleRecord();
-      audioEngine.stopAll();
-      setPlaying(false);
-    } else {
-      await audioEngine.play(currentTime, tracks);
-      setPlaying(true);
+    try {
+      await togglePlayback();
+    } catch {
+      notify('Playback could not start. Try again after the audio engine is ready.', 'error');
     }
   };
 
-  const handleStop = () => {
-    audioEngine.stopAll();
-    setPlaying(false);
-    if (isRecording) handleToggleRecord();
-    setCurrentTime(0);
+  const handleStop = async () => {
+    try {
+      await stopTransport();
+    } catch {
+      notify('The transport could not stop cleanly.', 'error');
+    }
   };
 
   const handleToggleRecord = async () => {
-    if (!isRecording) {
-      setRecording(true);
-      if (!isPlaying) {
-        await audioEngine.play(currentTime, tracks);
-        setPlaying(true);
-      }
-      await audioEngine.startRecording();
-    } else {
-      setRecording(false);
-      const { buffer } = await audioEngine.stopRecording();
-      
-      // Create new track for recording
-      const newTrackName = `Voice ${tracks.length + 1}`;
-      addTrack(newTrackName, 'audio');
-      
-      // Find the newly created track id (next tick basically)
-      // For simplicity in this demo, we'll wait a bit or use the last track
-      setTimeout(() => {
-        const state = useStore.getState();
-        const lastTrack = state.tracks[state.tracks.length - 1];
-        addRegion(lastTrack.id, {
-          startTime: currentTime,
-          duration: buffer.duration,
-          buffer
-        });
-      }, 50);
+    try {
+      await toggleRecording();
+      notify(isRecording ? 'Recording captured as a new audio track.' : 'Recording started.', isRecording ? 'success' : 'info');
+    } catch {
+      notify('Recording failed. Check microphone permission and try again.', 'error');
     }
   };
 
@@ -94,9 +73,9 @@ export default function Toolbar() {
     try {
       const id = await projectService.saveProject(projectName, tracks, bpm, projectId);
       setProjectId(id);
-      alert("Project saved successfully!");
+      notify('Project saved successfully.', 'success');
     } catch (e) {
-      alert("Failed to save project. Make sure you are signed in.");
+      notify('Save failed. Sign in and try again.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -104,10 +83,20 @@ export default function Toolbar() {
 
   const handleExport = async () => {
     setIsSaving(true);
-    // Simulate professional offline bounce/mixdown
-    await new Promise(r => setTimeout(r, 2500));
-    setIsSaving(false);
-    alert("Project Bounced Successfully! High-fidelity MP3 (320kbps) mixed down and ready.");
+    try {
+      const blob = await audioEngine.exportMixdown(tracks, bpm);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${projectName.trim() || 'soundspace-project'}.wav`;
+      link.click();
+      URL.revokeObjectURL(url);
+      notify('Exported a WAV mixdown.', 'success');
+    } catch {
+      notify('Export failed. Make sure the project has playable clips and try again.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -215,7 +204,9 @@ export default function Toolbar() {
              <div className="flex items-center leading-none">
                <input 
                  type="number"
-                 value={useStore.getState().bpm}
+                 min={40}
+                 max={240}
+                 value={bpm}
                  onChange={(e) => useStore.getState().setBpm(parseFloat(e.target.value))}
                  className="w-12 text-xl font-mono font-medium text-brand-orange bg-transparent border-none p-0 focus:ring-0 text-center appearance-none"
                />

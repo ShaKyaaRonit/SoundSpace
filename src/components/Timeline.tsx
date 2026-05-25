@@ -9,8 +9,10 @@ const PIXELS_PER_SECOND = 40;
 const TRACK_HEIGHT = 100;
 
 export default function Timeline() {
-  const { tracks, currentTime, duration, setCurrentTime, setPlaying, isPlaying } = useStore();
+  const { tracks, currentTime, duration, setCurrentTime, isPlaying } = useStore();
   const containerRef = useRef<HTMLDivElement>(null);
+  const isProcessing = useStore(s => s.isProcessing);
+  const processingMessage = useStore(s => s.processingMessage);
 
   const handleTimelineClick = (e: React.MouseEvent) => {
     if (!containerRef.current) return;
@@ -32,7 +34,7 @@ export default function Timeline() {
       onClick={handleTimelineClick}
     >
       {/* AI Processing Overlay */}
-      {useStore(s => s.isProcessing) && (
+      {isProcessing && (
         <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in duration-500">
            <div className="relative">
               <div className="absolute inset-0 bg-brand-orange blur-3xl opacity-20 animate-pulse"></div>
@@ -46,7 +48,7 @@ export default function Timeline() {
                     <div className="flex gap-1 h-1 w-48 bg-zinc-800 rounded-full overflow-hidden">
                        <div className="h-full bg-brand-orange animate-[loading_2s_infinite]" style={{ width: '40%' }}></div>
                     </div>
-                    <span className="text-[10px] font-mono text-zinc-500 tracking-widest uppercase mt-2">Analyzing Harmonic Content...</span>
+                    <span className="text-[10px] font-mono text-zinc-500 tracking-widest uppercase mt-2">{processingMessage || 'Processing project...'}</span>
                  </div>
               </div>
            </div>
@@ -92,7 +94,7 @@ export default function Timeline() {
 }
 
 function AudioRegion({ region, trackId }: { region: Region; trackId: string; key?: string }) {
-  const { updateTrack, tracks, setActiveRegion, selectedRegionId, setSelectedRegion, setProcessing, addTrack, addRegion } = useStore();
+  const { updateTrack, tracks, setActiveRegion, selectedRegionId, setSelectedRegion, setProcessing, addTrack, addRegion, notify } = useStore();
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startStartTime = useRef(0);
@@ -103,7 +105,7 @@ function AudioRegion({ region, trackId }: { region: Region; trackId: string; key
     e.stopPropagation();
     if (!region.audioUrl) return;
     
-    setProcessing(true);
+    setProcessing(true, 'Creating isolated stems...');
     try {
       // AI-Driven Stem Isolation
       const stems = [
@@ -114,22 +116,19 @@ function AudioRegion({ region, trackId }: { region: Region; trackId: string; key
       ];
 
       for (const stem of stems) {
-        addTrack(`${stem.name} AI Isolated`, 'audio');
-        await new Promise(r => setTimeout(r, 100));
+        const targetTrackId = addTrack(`${stem.name} AI Isolated`, 'audio');
         
-        const state = useStore.getState();
-        const targetTrack = state.tracks[state.tracks.length - 1];
-        
-        addRegion(targetTrack.id, {
+        addRegion(targetTrackId, {
           startTime: region.startTime,
           duration: region.duration,
           audioUrl: region.audioUrl,
           buffer: region.buffer,
           name: `${stem.name} (Isolated)`
-        } as any);
+        });
       }
+      notify('Created isolated stem tracks from the selected clip.', 'success');
     } catch (err) {
-      console.error(err);
+      notify('Stem splitting failed for this clip.', 'error');
     } finally {
       setProcessing(false);
     }
@@ -227,6 +226,7 @@ function AudioRegion({ region, trackId }: { region: Region; trackId: string; key
 
        {isSelected && (
         <button 
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={handleAiDeepSplit}
           className="absolute right-1 top-1 p-1 bg-[#1a1a1a] border border-brand-orange/40 rounded-full text-brand-orange hover:bg-brand-orange hover:text-black transition-all shadow-xl z-50 group/btn"
           title="AI Stem Splitter (Professional Isolation)"

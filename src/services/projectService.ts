@@ -30,6 +30,7 @@ export const projectService = {
         muted: t.muted,
         soloed: t.soloed,
         effects: t.effects || [],
+        instrument: t.instrument || null,
         regions: t.regions.map(r => ({
           id: r.id,
           startTime: r.startTime,

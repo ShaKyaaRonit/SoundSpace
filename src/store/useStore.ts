@@ -17,6 +17,7 @@ export interface Region {
   audioUrl?: string;
   buffer?: AudioBuffer;
   notes?: Note[]; // MIDI notes for patterns
+  name?: string;
 }
 
 export interface Effect {
@@ -60,6 +61,12 @@ export interface DAWState {
   snapEnabled: boolean;
   selectedRegionId: string | null;
   isProcessing: boolean; // For AI tasks
+  processingMessage: string | null;
+  notice: {
+    id: string;
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null;
   activeTool: 'pointer' | 'scissors';
   projectId: string | null;
   
@@ -71,16 +78,18 @@ export interface DAWState {
   setMetronome: (enabled: boolean) => void;
   setSnap: (enabled: boolean) => void;
   setSelectedRegion: (id: string | null) => void;
-  setProcessing: (processing: boolean) => void;
+  setProcessing: (processing: boolean, message?: string | null) => void;
+  notify: (message: string, type?: 'success' | 'error' | 'info') => void;
+  clearNotice: () => void;
   setCurrentTime: (time: number) => void;
   setActiveRegion: (id: string | null) => void;
   setBpm: (bpm: number) => void;
-  addTrack: (name: string, type?: 'audio' | 'midi') => void;
+  addTrack: (name: string, type?: 'audio' | 'midi') => string;
   deleteRegion: (trackId: string, regionId: string) => void;
   updateRegion: (trackId: string, regionId: string, updates: Partial<Region>) => void;
   updateTrack: (id: string, updates: Partial<Track>) => void;
   removeTrack: (id: string) => void;
-  addRegion: (trackId: string, region: Omit<Region, 'id'>) => void;
+  addRegion: (trackId: string, region: Omit<Region, 'id'>) => string;
   updateTrackInstrument: (trackId: string, updates: any) => void;
   setProject: (name: string, tracks: Track[]) => void;
   setProjectName: (name: string) => void;
@@ -114,6 +123,8 @@ export const useStore = create<DAWState>()(
       metronomeEnabled: false,
       snapEnabled: true,
       isProcessing: false,
+      processingMessage: null,
+      notice: null,
       activeTool: 'pointer',
       projectId: null,
 
@@ -124,32 +135,39 @@ export const useStore = create<DAWState>()(
       setMetronome: (enabled) => set({ metronomeEnabled: enabled }),
       setSnap: (enabled) => set({ snapEnabled: enabled }),
       setSelectedRegion: (id) => set({ selectedRegionId: id }),
-      setProcessing: (processing) => set({ isProcessing: processing }),
+      setProcessing: (processing, message = null) => set({ isProcessing: processing, processingMessage: processing ? message : null }),
+      notify: (message, type = 'info') => set({ notice: { id: uuidv4(), type, message } }),
+      clearNotice: () => set({ notice: null }),
       setCurrentTime: (time) => set({ currentTime: time }),
       setActiveRegion: (id) => set({ activeRegionId: id }),
-      setBpm: (bpm) => set({ bpm }),
-      addTrack: (name, type = 'audio') => set((state) => ({
-        tracks: [
-          ...state.tracks,
-          {
-            id: uuidv4(),
-            name,
-            type,
-            volume: 0.8,
-            pan: 0,
-            muted: false,
-            soloed: false,
-            regions: [],
-            effects: [],
-            instrument: type === 'midi' ? {
-              id: uuidv4(),
-              name: 'Deep Bass Synth',
-              type: 'synth-mono',
-              settings: { cutoff: 800, resonance: 2, attack: 0.05, release: 0.3 }
-            } : undefined
-          }
-        ]
-      })),
+      setBpm: (bpm) => set({ bpm: Number.isFinite(bpm) ? Math.min(240, Math.max(40, bpm)) : 120 }),
+      addTrack: (name, type = 'audio') => {
+        const id = uuidv4();
+        set((state) => ({
+          selectedTrackId: id,
+          tracks: [
+            ...state.tracks,
+            {
+              id,
+              name,
+              type,
+              volume: 0.8,
+              pan: 0,
+              muted: false,
+              soloed: false,
+              regions: [],
+              effects: [],
+              instrument: type === 'midi' ? {
+                id: uuidv4(),
+                name: 'Deep Bass Synth',
+                type: 'synth-mono',
+                settings: { cutoff: 800, resonance: 2, attack: 0.05, release: 0.3 }
+              } : undefined
+            }
+          ]
+        }));
+        return id;
+      },
       deleteRegion: (trackId, regionId) => set((state) => ({
         tracks: state.tracks.map(t => t.id === trackId ? { ...t, regions: t.regions.filter(r => r.id !== regionId) } : t),
         selectedRegionId: state.selectedRegionId === regionId ? null : state.selectedRegionId,
@@ -168,13 +186,18 @@ export const useStore = create<DAWState>()(
         tracks: state.tracks.filter(t => t.id !== id),
         selectedTrackId: state.selectedTrackId === id ? null : state.selectedTrackId
       })),
-      addRegion: (trackId, region) => set((state) => ({
-        tracks: state.tracks.map(t => 
-          t.id === trackId 
-            ? { ...t, regions: [...t.regions, { ...region, id: uuidv4() }] } 
-            : t
-        )
-      })),
+      addRegion: (trackId, region) => {
+        const id = uuidv4();
+        set((state) => ({
+          selectedRegionId: id,
+          tracks: state.tracks.map(t => 
+            t.id === trackId 
+              ? { ...t, regions: [...t.regions, { ...region, id }] } 
+              : t
+          )
+        }));
+        return id;
+      },
       updateTrackInstrument: (trackId, updates) => set((state) => ({
         tracks: state.tracks.map(t => 
           t.id === trackId && t.instrument 
@@ -182,7 +205,16 @@ export const useStore = create<DAWState>()(
             : t
         )
       })),
-      setProject: (name, tracks) => set({ projectName: name, tracks }),
+      setProject: (name, tracks) => set({
+        projectName: name,
+        tracks,
+        currentTime: 0,
+        isPlaying: false,
+        isRecording: false,
+        selectedTrackId: tracks[0]?.id ?? null,
+        selectedRegionId: null,
+        activeRegionId: null
+      }),
       setProjectName: (name) => set({ projectName: name })
     }),
     {
